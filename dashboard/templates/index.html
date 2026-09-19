@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Multi Robot RL Explorer
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="/static/style.css"
+    >
+
+</head>
+
+
+<body>
+
+<div class="app">
+
+    <!-- ================================================== -->
+    <!-- HEADER -->
+    <!-- ================================================== -->
+
+    <header>
+
+        <div>
+
+            <h1>
+                🤖 Multi-Robot Explorer
+            </h1>
+
+            <p>
+                Cooperative RL exploration system
+            </p>
+
+        </div>
+
+        <div id="connection">
+            ● Connecting...
+        </div>
+
+    </header>
+
+
+    <!-- ================================================== -->
+    <!-- MAIN -->
+    <!-- ================================================== -->
+
+    <main>
+
+        <!-- ================================================== -->
+        <!-- MAP -->
+        <!-- ================================================== -->
+
+        <section class="map-section">
+
+            <div class="section-header">
+
+                <h2>
+                    Live Exploration Map
+                </h2>
+
+                <div id="map-size">
+                    Map: 1 × 1
+                </div>
+
+            </div>
+
+
+            <div
+                id="map"
+                class="map"
+            ></div>
+
+
+            <div class="legend">
+
+                <span>
+                    <i class="start"></i>
+                    Start
+                </span>
+
+                <span>
+                    <i class="visited"></i>
+                    Visited
+                </span>
+
+                <span>
+                    <i class="unknown"></i>
+                    Discovered
+                </span>
+
+                <span>
+                    <i class="obstacle"></i>
+                    Obstacle
+                </span>
+
+                <span>
+                    <i class="robot"></i>
+                    Robot
+                </span>
+
+            </div>
+
+        </section>
+
+
+        <!-- ================================================== -->
+        <!-- SIDEBAR -->
+        <!-- ================================================== -->
+
+        <aside>
+
+
+            <!-- ================================================== -->
+            <!-- EXPLORATION STATS -->
+            <!-- ================================================== -->
+
+            <section class="card">
+
+                <h2>
+                    Exploration
+                </h2>
+
+                <div class="stats">
+
+                    <div>
+
+                        <strong id="visited">
+                            1
+                        </strong>
+
+                        <span>
+                            Visited
+                        </span>
+
+                    </div>
+
+
+                    <div>
+
+                        <strong id="discovered">
+                            1
+                        </strong>
+
+                        <span>
+                            Discovered
+                        </span>
+
+                    </div>
+
+
+                    <div>
+
+                        <strong id="obstacles">
+                            0
+                        </strong>
+
+                        <span>
+                            Obstacles
+                        </span>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- ================================================== -->
+            <!-- ROBOTS -->
+            <!-- ================================================== -->
+
+            <section class="card">
+
+                <h2>
+                    Robots
+                </h2>
+
+                <div id="robots">
+
+                </div>
+
+            </section>
+
+
+        </aside>
+
+    </main>
+
+</div>
+
+
+<script
+    src="/static/app.js"
+></script>
+
+</body>
+
+</html>
