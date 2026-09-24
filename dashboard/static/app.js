@@ -194,15 +194,12 @@ function sendRobotCommand(
 function render(state) {
 
     renderMap(
-
         state.map || [],
-
         state.robots || []
     );
 
 
     renderRobots(
-
         state.robots || []
     );
 }
@@ -817,23 +814,6 @@ function renderRobots(
                                 </small>
                             </button>
 
-
-                            <button
-                                class="control-button scan"
-                                onclick="
-                                    sendRobotCommand(
-                                        ${robot.id},
-                                        'SCAN'
-                                    )
-                                "
-                                ${!manual ? "disabled" : ""}
-                            >
-                                🔍
-                                <small>
-                                    Scan
-                                </small>
-                            </button>
-
                         </div>
 
 
@@ -841,32 +821,10 @@ function renderRobots(
 
                             <div class="sensor">
 
-                                L<br>
-
-                                ${formatSensor(
-                                    sensors.left
-                                )}
-
-                            </div>
-
-
-                            <div class="sensor">
-
-                                F<br>
+                                Front<br>
 
                                 ${formatSensor(
                                     sensors.front
-                                )}
-
-                            </div>
-
-
-                            <div class="sensor">
-
-                                R<br>
-
-                                ${formatSensor(
-                                    sensors.right
                                 )}
 
                             </div>
@@ -977,15 +935,6 @@ document.addEventListener(
                 break;
 
 
-            case "arrowdown":
-            case "s":
-
-                command =
-                    "BACKWARD";
-
-                break;
-
-
             case "arrowleft":
             case "a":
 
@@ -1000,6 +949,15 @@ document.addEventListener(
 
                 command =
                     "RIGHT";
+
+                break;
+
+
+            case "arrowdown":
+            case "s":
+
+                command =
+                    "BACKWARD";
 
                 break;
 

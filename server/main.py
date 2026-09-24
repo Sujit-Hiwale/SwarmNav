@@ -24,6 +24,7 @@ from .map_manager import (
 )
 from .auto_controller import auto_controller
 
+
 # ============================================================
 # PATHS
 # ============================================================
@@ -43,6 +44,7 @@ STATIC_DIR = DASHBOARD_DIR / "static"
 app = FastAPI(
     title="Multi-Robot RL Explorer"
 )
+
 
 @app.on_event("startup")
 async def start_auto_controller():
@@ -80,7 +82,7 @@ def get_state():
 
 
 # ============================================================
-# BROADCAST STATE TO ALL BROWSERS
+# BROADCAST STATE
 # ============================================================
 
 async def broadcast_state():
@@ -156,7 +158,7 @@ async def dashboard_websocket(
         "[DASHBOARD] Browser connected"
     )
 
-    # Send current state immediately.
+    # Send current state immediately
     await websocket.send_text(
         json.dumps(
             get_state()
@@ -190,11 +192,9 @@ async def dashboard_websocket(
 
                 continue
 
-
             message_type = data.get(
                 "type"
             )
-
 
             # =================================================
             # ROBOT CONTROL
@@ -208,12 +208,10 @@ async def dashboard_websocket(
 
                 continue
 
-
             print(
                 f"[DASHBOARD] Unknown message "
                 f"type: {message_type}"
             )
-
 
     except WebSocketDisconnect:
 
@@ -246,7 +244,6 @@ async def handle_dashboard_control(
         "action"
     )
 
-
     if robot_id is None:
 
         print(
@@ -254,7 +251,6 @@ async def handle_dashboard_control(
         )
 
         return
-
 
     try:
 
@@ -274,11 +270,9 @@ async def handle_dashboard_control(
 
         return
 
-
     robot = robots.get(
         robot_id
     )
-
 
     if robot is None:
 
@@ -288,7 +282,6 @@ async def handle_dashboard_control(
         )
 
         return
-
 
     # ========================================================
     # SET MODE
@@ -312,7 +305,6 @@ async def handle_dashboard_control(
 
             return
 
-
         robot.mode = mode
 
         print(
@@ -324,7 +316,6 @@ async def handle_dashboard_control(
 
         return
 
-
     # ========================================================
     # ROBOT COMMAND
     # ========================================================
@@ -335,16 +326,14 @@ async def handle_dashboard_control(
             "command"
         )
 
-
+        # New ESP32 supports only these commands
         allowed_commands = {
             "FORWARD",
             "BACKWARD",
             "LEFT",
             "RIGHT",
             "STOP",
-            "SCAN",
         }
-
 
         if command not in allowed_commands:
 
@@ -355,15 +344,13 @@ async def handle_dashboard_control(
 
             return
 
-
-        # -----------------------------------------------
-        # Don't allow a second movement while the first
-        # one is still executing.
-        # -----------------------------------------------
+        # ------------------------------------------------
+        # Don't allow another movement while busy
+        # ------------------------------------------------
 
         if (
             robot.pending_command
-            and command not in {"STOP"}
+            and command != "STOP"
         ):
 
             print(
@@ -374,19 +361,13 @@ async def handle_dashboard_control(
 
             return
 
-
         print(
             f"[CONTROL] Sending "
             f"{command} "
             f"-> ROBOT_{robot_id}"
         )
 
-
-        success = await send_command(
-            robot_id,
-            command
-        )
-
+        success = await send_command(robot_id, command)
 
         if success:
 
@@ -403,11 +384,9 @@ async def handle_dashboard_control(
                 f"command to ROBOT_{robot_id}"
             )
 
-
         await broadcast_state()
 
         return
-
 
     print(
         f"[CONTROL] Unknown action: "
@@ -442,11 +421,9 @@ async def robot_websocket(
                 await websocket.receive_text()
             )
 
-
             print(
                 f"[ROBOT RX] {raw_message}"
             )
-
 
             try:
 
@@ -462,11 +439,9 @@ async def robot_websocket(
 
                 continue
 
-
             robot_id_value = data.get(
                 "robot_id"
             )
-
 
             if robot_id_value is None:
 
@@ -476,7 +451,6 @@ async def robot_websocket(
                 )
 
                 continue
-
 
             try:
 
@@ -495,7 +469,6 @@ async def robot_websocket(
 
                 continue
 
-
             # =================================================
             # REGISTRATION
             # =================================================
@@ -509,6 +482,25 @@ async def robot_websocket(
                     websocket
                 )
 
+                robot = robots.get(
+                    robot_id
+                )
+
+                # Store camera information
+                if robot is not None:
+
+                    robot.camera = data.get(
+                        "camera",
+                        False
+                    )
+
+                    robot.camera_host = data.get(
+                        "camera_host"
+                    )
+
+                    robot.camera_stream = data.get(
+                        "camera_stream"
+                    )
 
                 print(
                     f"[ROBOT] ✓ "
@@ -516,6 +508,12 @@ async def robot_websocket(
                     f"registered"
                 )
 
+                if robot is not None:
+
+                    print(
+                        f"[CAMERA] ROBOT_{robot_id}: "
+                        f"{robot.camera_stream}"
+                    )
 
                 await websocket.send_text(
                     json.dumps({
@@ -524,19 +522,32 @@ async def robot_websocket(
 
                         "type":
                             "REGISTERED",
+
+                        "camera":
+                            data.get(
+                                "camera",
+                                False
+                            ),
+
+                        "camera_host":
+                            data.get(
+                                "camera_host"
+                            ),
+
+                        "camera_stream":
+                            data.get(
+                                "camera_stream"
+                            ),
                     })
                 )
-
 
                 await broadcast_state()
 
                 continue
 
-
             robot = robots.get(
                 robot_id
             )
-
 
             if robot is None:
 
@@ -547,7 +558,6 @@ async def robot_websocket(
 
                 continue
 
-
             # =================================================
             # SENSOR DATA
             # =================================================
@@ -556,45 +566,51 @@ async def robot_websocket(
                 "type"
             ) == "SENSOR":
 
-                robot.left_distance = (
-                    data.get("left")
-                )
-
+                # New robot has only FRONT ultrasonic
                 robot.front_distance = (
                     data.get("front")
                 )
 
-                robot.right_distance = (
-                    data.get("right")
-                )
+                # No left/right sensors anymore
+                robot.left_distance = None
+                robot.right_distance = None
 
-                if robot.pending_command == "SCAN":
-                    robot.pending_command = None
-                    robot.current_action = "IDLE"
-                    robot.status = "READY"
+                # Update camera information if supplied
+                if "camera" in data:
+
+                    robot.camera = data.get(
+                        "camera"
+                    )
+
+                if "camera_host" in data:
+
+                    robot.camera_host = data.get(
+                        "camera_host"
+                    )
+
+                if "camera_stream" in data:
+
+                    robot.camera_stream = data.get(
+                        "camera_stream"
+                    )
 
                 robot.status = (
                     "SENSORS_UPDATED"
                 )
 
-
                 print(
                     f"[SENSOR] ROBOT_{robot_id} "
-                    f"L={robot.left_distance} "
-                    f"F={robot.front_distance} "
-                    f"R={robot.right_distance}"
+                    f"F={robot.front_distance}"
                 )
 
-
+                # Mark only front obstacle
                 mark_obstacles(
                     robot_id
                 )
 
-
                 await broadcast_state()
 
                 continue
-
 
             # =================================================
             # STATUS
@@ -609,16 +625,13 @@ async def robot_websocket(
                     "UNKNOWN"
                 )
 
-
                 robot.status = status
-
 
                 print(
                     f"[ROBOT STATUS] "
                     f"ROBOT_{robot_id}: "
                     f"{status}"
                 )
-
 
                 # ---------------------------------------------
                 # ACTION COMPLETED
@@ -630,32 +643,36 @@ async def robot_websocket(
                         robot.pending_command
                     )
 
-
                     if completed_action:
 
-                        update_robot_position(
-                            robot_id,
-                            completed_action
-                        )
+                        # Only movement commands affect map
+                        if completed_action in {
+                            "FORWARD",
+                            "BACKWARD",
+                            "LEFT",
+                            "RIGHT",
+                        }:
 
+                            update_robot_position(
+                                robot_id,
+                                completed_action
+                            )
 
-                        print(
-                            f"[MAP] ROBOT_{robot_id} "
-                            f"completed "
-                            f"{completed_action} | "
-                            f"Position="
-                            f"({robot.x},{robot.y}) | "
-                            f"Direction="
-                            f"{robot.orientation}"
-                        )
-
+                            print(
+                                f"[MAP] ROBOT_{robot_id} "
+                                f"completed "
+                                f"{completed_action} | "
+                                f"Position="
+                                f"({robot.x},{robot.y}) | "
+                                f"Direction="
+                                f"{robot.orientation}"
+                            )
 
                     robot.pending_command = None
 
                     robot.current_action = (
                         "IDLE"
                     )
-
 
                 # ---------------------------------------------
                 # BLOCKED
@@ -668,25 +685,21 @@ async def robot_websocket(
                         f"was BLOCKED"
                     )
 
-
-                    # Do NOT update position.
+                    # Do NOT update position
                     robot.pending_command = None
 
                     robot.current_action = (
                         "BLOCKED"
                     )
 
-
                 await broadcast_state()
 
                 continue
-
 
             print(
                 f"[ROBOT] Unknown message: "
                 f"{data}"
             )
-
 
     except WebSocketDisconnect:
 
@@ -711,6 +724,5 @@ async def robot_websocket(
                 f"[ROBOT] ROBOT_{robot_id} "
                 f"disconnected"
             )
-
 
         await broadcast_state()

@@ -3,6 +3,10 @@ from .state import (
     map_cells,
 )
 
+import cv2
+import os
+import time
+
 
 # ============================================================
 # DIRECTIONS
@@ -15,10 +19,6 @@ DIRECTIONS = {
     "WEST":  (-1, 0),
 }
 
-
-# ============================================================
-# ROTATION
-# ============================================================
 
 RIGHT_TURN = {
     "NORTH": "EAST",
@@ -37,6 +37,23 @@ LEFT_TURN = {
 
 
 # ============================================================
+# OBJECT STORAGE
+#
+# One object can have observations from multiple robots.
+# ============================================================
+
+objects = {}
+
+
+OBJECT_IMAGE_DIR = "data/target_images"
+
+os.makedirs(
+    OBJECT_IMAGE_DIR,
+    exist_ok=True
+)
+
+
+# ============================================================
 # MARK CELL AS VISITED
 # ============================================================
 
@@ -52,12 +69,13 @@ def mark_visited(
             "type": "free",
             "visited": False,
             "last_robot": None,
+
+            "objects": [],
+            "observations": [],
         },
     )
 
-
     cell["visited"] = True
-
     cell["last_robot"] = robot_id
 
 
@@ -70,21 +88,14 @@ def update_robot_position(
     action: str,
 ):
 
-    robot = robots.get(
-        robot_id
-    )
-
+    robot = robots.get(robot_id)
 
     if robot is None:
-
         return
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # LEFT
-    #
-    # Turning does NOT change position.
-    # ========================================================
+    # --------------------------------------------------------
 
     if action == "LEFT":
 
@@ -94,12 +105,9 @@ def update_robot_position(
 
         return
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # RIGHT
-    #
-    # Turning does NOT change position.
-    # ========================================================
+    # --------------------------------------------------------
 
     if action == "RIGHT":
 
@@ -109,10 +117,9 @@ def update_robot_position(
 
         return
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # FORWARD
-    # ========================================================
+    # --------------------------------------------------------
 
     if action == "FORWARD":
 
@@ -120,19 +127,12 @@ def update_robot_position(
             robot.orientation
         ]
 
-        new_x = robot.x + dx
-        new_y = robot.y + dy
+        robot.x += dx
+        robot.y += dy
 
-
-        robot.x = new_x
-        robot.y = new_y
-
-
-    # ========================================================
+    # --------------------------------------------------------
     # BACKWARD
-    #
-    # Backward movement is opposite to current orientation.
-    # ========================================================
+    # --------------------------------------------------------
 
     elif action == "BACKWARD":
 
@@ -143,15 +143,13 @@ def update_robot_position(
         robot.x -= dx
         robot.y -= dy
 
-
     else:
 
         return
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # RECORD PATH
-    # ========================================================
+    # --------------------------------------------------------
 
     robot.path.append(
         (
@@ -160,10 +158,9 @@ def update_robot_position(
         )
     )
 
-
-    # ========================================================
-    # MARK NEW CELL VISITED
-    # ========================================================
+    # --------------------------------------------------------
+    # MARK CELL
+    # --------------------------------------------------------
 
     mark_visited(
         robot.x,
@@ -173,155 +170,265 @@ def update_robot_position(
 
 
 # ============================================================
-# MARK SURROUNDING CELLS FROM ULTRASONIC DATA
+# MARK OBSTACLES FROM ULTRASONIC
 # ============================================================
 
-def mark_obstacles(
-    robot_id: int,
-):
+def mark_obstacles(robot_id: int):
+    robot = robots.get(robot_id)
 
-    robot = robots.get(
-        robot_id
-    )
-
-
-    if robot is None:
-
+    if robot is None or robot.front_distance is None:
         return
 
+    dx, dy = DIRECTIONS[robot.orientation]
+
+    cell_x = robot.x + dx
+    cell_y = robot.y + dy
+
+    cell = map_cells.setdefault(
+        (cell_x, cell_y),
+        {
+            "type": "free",
+            "visited": False,
+            "last_robot": None,
+            "objects": [],
+            "observations": [],
+        },
+    )
+
+    if robot.front_distance < 20:
+        cell["type"] = "obstacle"
+    elif cell["type"] != "obstacle":
+        cell["type"] = "free"
+
+# ============================================================
+# ADD OBJECT DETECTION
+# ============================================================
+
+def add_object_detection(
+    robot_id: int,
+    class_name: str,
+    confidence: float,
+    image,
+    direction,
+    distance,
+    target=False,
+):
+    """
+    Record an object detected by a particular robot.
+
+    direction:
+        Direction from robot toward object.
+
+    distance:
+        Estimated distance in grid/cell units or meters,
+        depending on your vision system.
+    """
+
+    robot = robots.get(robot_id)
+
+    if robot is None:
+        return None
+
+    robot_position = (
+        robot.x,
+        robot.y,
+    )
 
     # --------------------------------------------------------
-    # Distance readings
+    # Estimate object grid position.
+    #
+    # For now this assumes distance is measured in grid
+    # cells. We'll later replace this with proper camera
+    # geometry.
     # --------------------------------------------------------
 
-    readings = {
+    dx, dy = DIRECTIONS.get(
+        robot.orientation,
+        (0, 0)
+    )
 
-        "left":
-            robot.left_distance,
+    object_x = round(
+        robot.x + dx * distance
+    )
 
-        "front":
-            robot.front_distance,
+    object_y = round(
+        robot.y + dy * distance
+    )
 
-        "right":
-            robot.right_distance,
-    }
-
+    object_position = (
+        object_x,
+        object_y,
+    )
 
     # --------------------------------------------------------
-    # Relative directions from robot orientation
+    # Object ID
+    #
+    # For now class + position.
+    # Later we can add actual object tracking.
     # --------------------------------------------------------
 
-    relative_directions = {
+    object_id = (
+        f"{class_name}_"
+        f"{object_x}_"
+        f"{object_y}"
+    )
 
-        "NORTH": {
+    # --------------------------------------------------------
+    # New object
+    # --------------------------------------------------------
 
-            "left":  "WEST",
-            "front": "NORTH",
-            "right": "EAST",
-        },
+    if object_id not in objects:
 
-        "EAST": {
+        image_path = None
 
-            "left":  "NORTH",
-            "front": "EAST",
-            "right": "SOUTH",
-        },
+        if image is not None:
 
-        "SOUTH": {
-
-            "left":  "EAST",
-            "front": "SOUTH",
-            "right": "WEST",
-        },
-
-        "WEST": {
-
-            "left":  "SOUTH",
-            "front": "WEST",
-            "right": "NORTH",
-        },
-    }
-
-
-    directions = relative_directions[
-        robot.orientation
-    ]
-
-
-    # ========================================================
-    # PROCESS EACH SENSOR
-    # ========================================================
-
-    for sensor_direction, distance in readings.items():
-
-        if distance is None:
-
-            continue
-
-
-        absolute_direction = directions[
-            sensor_direction
-        ]
-
-
-        dx, dy = DIRECTIONS[
-            absolute_direction
-        ]
-
-
-        cell_x = robot.x + dx
-        cell_y = robot.y + dy
-
-
-        # ----------------------------------------------------
-        # Obstacle
-        # ----------------------------------------------------
-
-        if distance < 20:
-
-            # Don't overwrite a robot's current cell.
-            if (
-                cell_x == robot.x
-                and
-                cell_y == robot.y
-            ):
-
-                continue
-
-
-            map_cells[
-                (cell_x, cell_y)
-            ] = {
-
-                "type": "obstacle",
-
-                "visited": False,
-
-                "last_robot": None,
-            }
-
-
-        # ----------------------------------------------------
-        # Free / discovered cell
-        # ----------------------------------------------------
-
-        else:
-
-            cell = map_cells.setdefault(
-                (cell_x, cell_y),
-                {
-                    "type": "free",
-                    "visited": False,
-                    "last_robot": None,
-                },
+            image_path = os.path.join(
+                OBJECT_IMAGE_DIR,
+                f"{object_id}_{int(time.time())}.jpg"
             )
 
+            cv2.imwrite(
+                image_path,
+                image
+            )
 
-            # Never turn an already-known obstacle into
-            # a free cell just because of another reading.
-            if cell["type"] != "obstacle":
+        objects[object_id] = {
 
-                cell["type"] = "free"
+            "id":
+                object_id,
+
+            "class":
+                class_name,
+
+            "position":
+                object_position,
+
+            "image":
+                image_path,
+
+            "confidence":
+                confidence,
+
+            "target":
+                target,
+
+            "observations":
+                [],
+        }
+
+    # --------------------------------------------------------
+    # Existing object
+    # --------------------------------------------------------
+
+    else:
+
+        existing = objects[
+            object_id
+        ]
+
+        # Keep highest confidence.
+        if confidence > existing["confidence"]:
+
+            existing["confidence"] = confidence
+
+    # --------------------------------------------------------
+    # Record observation
+    # --------------------------------------------------------
+
+    observation = {
+
+        "robot_id":
+            robot_id,
+
+        "robot_position":
+            robot_position,
+
+        "robot_orientation":
+            robot.orientation,
+
+        "direction":
+            direction,
+
+        "distance":
+            distance,
+
+        "confidence":
+            confidence,
+
+        "timestamp":
+            time.time(),
+    }
+
+    objects[
+        object_id
+    ][
+        "observations"
+    ].append(
+        observation
+    )
+
+    # --------------------------------------------------------
+    # Store object reference in target cell
+    # --------------------------------------------------------
+
+    cell = map_cells.setdefault(
+        object_position,
+        {
+            "type": "free",
+            "visited": False,
+            "last_robot": None,
+            "objects": [],
+            "observations": [],
+        },
+    )
+
+    if object_id not in cell["objects"]:
+
+        cell["objects"].append(
+            object_id
+        )
+
+    # --------------------------------------------------------
+    # Store observation in the robot's cell.
+    #
+    # This is what allows your UI to show:
+    #
+    # "Target was seen from here."
+    # --------------------------------------------------------
+
+    robot_cell = map_cells.setdefault(
+        robot_position,
+        {
+            "type": "free",
+            "visited": True,
+            "last_robot": robot_id,
+            "objects": [],
+            "observations": [],
+        },
+    )
+
+    robot_cell[
+        "observations"
+    ].append({
+
+        "object_id":
+            object_id,
+
+        "robot_id":
+            robot_id,
+
+        "direction":
+            direction,
+
+        "distance":
+            distance,
+
+        "timestamp":
+            time.time(),
+    })
+
+    return object_id
 
 
 # ============================================================
@@ -331,7 +438,6 @@ def mark_obstacles(
 def get_map_data():
 
     result = []
-
 
     for (
         (x, y),
@@ -362,7 +468,28 @@ def get_map_data():
                 cell.get(
                     "last_robot",
                 ),
+
+            "objects":
+                cell.get(
+                    "objects",
+                    [],
+                ),
+
+            "observations":
+                cell.get(
+                    "observations",
+                    [],
+                ),
         })
-
-
     return result
+
+
+# ============================================================
+# GET OBJECT DATA
+# ============================================================
+
+def get_object_data():
+
+    return list(
+        objects.values()
+    )

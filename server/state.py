@@ -37,13 +37,7 @@ class RobotState:
     # AUTO   = automatic exploration controller controls robot
     mode: str = "MANUAL"
 
-    # --------------------------------------------------------
-    # ULTRASONIC SENSOR DATA
-    # --------------------------------------------------------
-
-    left_distance: float | None = None
     front_distance: float | None = None
-    right_distance: float | None = None
 
     # --------------------------------------------------------
     # MOVEMENT HISTORY

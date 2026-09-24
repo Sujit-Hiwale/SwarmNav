@@ -246,15 +246,8 @@ def robot_data():
                 robot.mode,
 
             "sensors": {
-
-                "left":
-                    robot.left_distance,
-
                 "front":
                     robot.front_distance,
-
-                "right":
-                    robot.right_distance,
             },
 
             "path": [

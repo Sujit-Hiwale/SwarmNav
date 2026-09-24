@@ -14,8 +14,6 @@ from .map_manager import (
 
 SAFE_DISTANCE = 20.0
 
-SCAN_COMMAND = "SCAN"
-
 MOVE_COMMANDS = {
     "NORTH": "FORWARD",
     "EAST": "FORWARD",
@@ -71,24 +69,6 @@ class AutoController:
             f"DIR={robot.orientation}"
         )
 
-        # -------------------------------------------------
-        # 1. We need a fresh scan before making a decision
-        # -------------------------------------------------
-
-        if not self.has_sensor_data(robot):
-
-            print(
-                f"[AUTO] ROBOT_{robot_id}: "
-                f"Sensor data unavailable -> SCAN"
-            )
-
-            await send_command(robot_id, SCAN_COMMAND)
-            return
-
-        # -------------------------------------------------
-        # 2. Update the global map using ultrasonic data
-        # -------------------------------------------------
-
         mark_visited(
             robot.x,
             robot.y,
@@ -97,20 +77,12 @@ class AutoController:
 
         mark_obstacles(robot_id)
 
-        # -------------------------------------------------
-        # 3. Find unexplored directions
-        # -------------------------------------------------
-
         available = self.get_available_directions(robot)
 
         print(
             f"[AUTO] ROBOT_{robot_id}: "
             f"available={available}"
         )
-
-        # -------------------------------------------------
-        # 4. Prefer unexplored directions
-        # -------------------------------------------------
 
         unexplored = []
 
@@ -128,10 +100,6 @@ class AutoController:
 
             elif not cell.get("visited", False):
                 unexplored.append(direction)
-
-        # -------------------------------------------------
-        # 5. If unexplored area exists, go there
-        # -------------------------------------------------
 
         if unexplored:
 
@@ -152,11 +120,6 @@ class AutoController:
 
             return
 
-        # -------------------------------------------------
-        # 6. Everything around us is known.
-        #    Find another frontier in the global map.
-        # -------------------------------------------------
-
         frontier = self.find_nearest_frontier(robot)
 
         if frontier is not None:
@@ -175,10 +138,6 @@ class AutoController:
 
             return
 
-        # -------------------------------------------------
-        # 7. No unexplored area remains.
-        # -------------------------------------------------
-
         print(
             f"[AUTO] ROBOT_{robot_id}: "
             f"No unexplored area detected"
@@ -186,43 +145,11 @@ class AutoController:
 
         robot.current_action = "EXPLORATION_COMPLETE"
 
-    # =====================================================
-    # SENSOR HANDLING
-    # =====================================================
-
-    def has_sensor_data(self, robot):
-
-        return (
-            robot.left_distance is not None
-            and robot.front_distance is not None
-            and robot.right_distance is not None
-        )
-
     def get_available_directions(self, robot):
-
         available = []
 
-        if (
-            robot.front_distance is not None
-            and robot.front_distance >= SAFE_DISTANCE
-        ):
+        if robot.front_distance is not None and robot.front_distance >= SAFE_DISTANCE:
             available.append(robot.orientation)
-
-        left_direction = LEFT_TURN[robot.orientation]
-
-        if (
-            robot.left_distance is not None
-            and robot.left_distance >= SAFE_DISTANCE
-        ):
-            available.append(left_direction)
-
-        right_direction = RIGHT_TURN[robot.orientation]
-
-        if (
-            robot.right_distance is not None
-            and robot.right_distance >= SAFE_DISTANCE
-        ):
-            available.append(right_direction)
 
         return available
 
@@ -308,16 +235,7 @@ class AutoController:
 
             return
 
-        # 180-degree turn
-        print(
-            f"[AUTO] ROBOT_{robot.robot_id}: "
-            f"180 degree turn"
-        )
-
-        await send_command(
-            robot.robot_id,
-            "RIGHT"
-        )
+        await send_command(robot.robot_id, "RIGHT")
 
     # =====================================================
     # MAP HELPERS
