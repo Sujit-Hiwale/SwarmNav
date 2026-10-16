@@ -1,73 +1,125 @@
 # SwarmNav
 
-SwarmNav is a multi-robot exploration and navigation system in which a laptop acts as the central server for coordinating multiple ESP32-based robots.
+SwarmNav is a multi-robot exploration and navigation system built around a centralized server and multiple ESP32-based mobile robots.
 
-Each robot provides movement and ultrasonic sensing, while the server maintains the robot states, exploration map, movement paths, and autonomous exploration logic. A web dashboard provides real-time monitoring and manual control.
+The system allows multiple robots to connect over a local Wi-Fi network, communicate with a central FastAPI server through WebSockets, receive movement commands, report ultrasonic sensor information, maintain logical positions and orientations, and participate in autonomous exploration.
 
-The system is designed to support multiple robots operating cooperatively in the same environment and provides a foundation for future multi-agent reinforcement learning.
+The project is designed as a modular foundation for cooperative multi-robot exploration, with support for robotic perception, mapping, navigation, and multi-robot operation.
 
 ---
 
-## System Architecture
+## Overview
+
+SwarmNav separates the robotic system into several layers:
 
 ```text
-                         ┌──────────────────────────┐
-                         │          Laptop          │
-                         │                          │
-                         │      FastAPI Server      │
-                         │                          │
-                         │  ┌────────────────────┐  │
-                         │  │ Robot Manager      │  │
-                         │  │ State Management   │  │
-                         │  │ Map Manager        │  │
-                         │  │ Auto Controller    │  │
-                         │  └────────────────────┘  │
-                         │                          │
-                         │       Web Dashboard      │
-                         └────────────┬─────────────┘
-                                      │
-                               Wi-Fi / WebSocket
-                                      │
-                  ┌───────────────────┼───────────────────┐
-                  │                   │                   │
-           ┌──────▼──────┐     ┌──────▼──────┐     ┌──────▼──────┐
-           │   Robot 1   │     │   Robot 2   │     │   Robot N   │
-           │    ESP32    │     │    ESP32    │     │    ESP32    │
-           │             │     │             │     │             │
-           │   Motors    │     │   Motors    │     │   Motors    │
-           │ Ultrasonic  │     │ Ultrasonic  │     │ Ultrasonic  │
-           │    Servo    │     │    Servo    │     │    Servo    │
-           └─────────────┘     └─────────────┘     └─────────────┘
+┌──────────────────────────────────────────────┐
+│                 Web Dashboard                │
+│        Monitoring • Manual • Auto            │
+└──────────────────────┬───────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────┐
+│              FastAPI Central Server          │
+│                                              │
+│  Robot Manager • State • Mapping             │
+│  Autonomous Controller • WebSocket Server    │
+└──────────────────────┬───────────────────────┘
+                       │
+                 Wi-Fi / WebSocket
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+     ┌─────────┐  ┌─────────┐  ┌─────────┐
+     │ Robot 1 │  │ Robot 2 │  │ Robot N │
+     │  ESP32  │  │  ESP32  │  │  ESP32  │
+     │         │  │         │  │         │
+     │ Motors  │  │ Motors  │  │ Motors  │
+     │Ultrasonic│ │Ultrasonic│ │Ultrasonic│
+     └─────────┘  └─────────┘  └─────────┘
 ```
 
-The laptop and robots communicate over the same local Wi-Fi network. The current setup can use a phone hotspot as the local network.
+The laptop acts as the central coordination and decision-making system, while the ESP32 robots handle low-level motor control and local obstacle sensing.
 
 ---
 
-## Features
+## Key Features
 
-* Multi-robot WebSocket communication
-* Dynamic robot registration
-* Configurable robot IDs
-* Robot reconnection handling
-* Server-side robot state management
-* Server-authoritative logical position and orientation
-* Robot movement history and path tracking
-* Shared exploration map
-* Ultrasonic obstacle detection
-* Servo-based directional scanning
-* Manual robot control
-* Autonomous exploration mode
-* Per-robot MANUAL/AUTO control
-* Real-time web dashboard
-* Real-time sensor information
-* Robot path visualization
-* Dynamic exploration map
-* Architecture prepared for multi-agent reinforcement learning
+- Multi-robot WebSocket communication
+- Dynamic robot registration
+- Unique robot IDs
+- Wi-Fi-based robot communication
+- mDNS-based server discovery
+- Automatic WebSocket reconnection
+- Server-side robot state management
+- Logical position and orientation tracking
+- Grid-based exploration map
+- Robot movement history and path tracking
+- Ultrasonic obstacle detection
+- Forward movement safety stop
+- Manual robot control
+- Per-robot MANUAL/AUTO modes
+- Autonomous exploration controller
+- Real-time sensor reporting
+- Real-time web dashboard
+- Robot path visualization
+- Shared exploration state
+- YOLO-based object detection
+- Camera-equipped robot support
 
 ---
 
-## Repository Structure
+# System Architecture
+
+SwarmNav follows a centralized architecture.
+
+```text
+                        ┌─────────────────────────┐
+                        │         Laptop          │
+                        │                         │
+                        │      FastAPI Server     │
+                        │                         │
+                        │  ┌───────────────────┐  │
+                        │  │ Robot Manager     │  │
+                        │  │ State Management  │  │
+                        │  │ Map Manager       │  │
+                        │  │ Auto Controller   │  │
+                        │  │ Vision            │  │
+                        │  └───────────────────┘  │
+                        │                         │
+                        │     Web Dashboard       │
+                        └────────────┬────────────┘
+                                     │
+                               Wi-Fi / WebSocket
+                                     │
+                   ┌─────────────────┼─────────────────┐
+                   │                 │                 │
+                   ▼                 ▼                 ▼
+             ┌──────────┐      ┌──────────┐      ┌──────────┐
+             │ Robot 1  │      │ Robot 2  │      │ Robot N  │
+             │  ESP32   │      │  ESP32   │      │  ESP32   │
+             │          │      │          │      │          │
+             │  Motors  │      │  Motors  │      │  Motors  │
+             │Ultrasonic│      │Ultrasonic│      │Ultrasonic│
+             └──────────┘      └──────────┘      └──────────┘
+```
+
+The server is responsible for high-level coordination, mapping, robot state, vision processing, and autonomous decisions.
+
+The ESP32 is responsible for low-level robot operation such as:
+
+- Motor control
+- Ultrasonic measurement
+- Local forward obstacle protection
+- WebSocket communication
+- Receiving and executing movement commands
+- Robot registration
+
+This separation keeps the embedded firmware lightweight while allowing the server to perform more complex processing.
+
+---
+
+# Repository Structure
 
 ```text
 SwarmNav/
@@ -80,249 +132,462 @@ SwarmNav/
 │   └── templates/
 │       └── index.html
 │
+├── data/
+│   └── vision/
+│       ├── detections.json
+│       └── images/
+│
+├── image/
+│   ├── test.py
+│   ├── test_yolo.py
+│   └── test_yolo_img.py
+│
 ├── robots/
+│   ├── cam.ino
 │   └── robots.ino
+│
+├── runs/
+│   └── vision/
 │
 ├── server/
 │   ├── auto_controller.py
 │   ├── main.py
 │   ├── map_manager.py
 │   ├── robot_manager.py
-│   └── state.py
+│   ├── state.py
+│   └── vision.py
 │
 ├── requirements.txt
 └── README.md
 ```
 
-### `server/`
+Generated files, caches, model weights, and other development artifacts may not be included in the repository depending on the `.gitignore` configuration.
 
-Contains the central server-side logic.
+---
 
-#### `main.py`
+# Server
+
+The `server/` directory contains the central intelligence and communication layer.
+
+## `main.py`
 
 The main FastAPI application.
 
 It handles:
 
-* Web dashboard
-* Robot WebSocket connections
-* Robot registration
-* Sensor updates
-* Robot commands
-* Manual/Auto mode switching
-* Dashboard state updates
-
-#### `state.py`
-
-Contains the central state representation.
-
-It stores:
-
-* Connected robots
-* Robot positions
-* Robot orientations
-* Robot modes
-* Sensor readings
-* Pending commands
-* Robot paths
-* Global map cells
-
-#### `robot_manager.py`
-
-Responsible for robot communication and lifecycle management.
-
-It handles:
-
-* Robot registration
-* Reconnection
-* Disconnection
-* Command transmission
-* Dashboard robot data
-
-Robot state is preserved when a robot temporarily disconnects.
-
-#### `map_manager.py`
-
-Maintains the global exploration map.
-
-It tracks:
-
-* Visited cells
-* Free cells
-* Obstacles
-* Robot locations
-* Exploration paths
-
-#### `auto_controller.py`
-
-Contains the autonomous exploration controller.
-
-It uses the available sensor information and the shared map to determine movement for robots operating in `AUTO` mode.
-
-The current controller is a baseline exploration implementation and is intended to be extended with more advanced multi-robot planning and reinforcement learning.
+- Web dashboard
+- Robot WebSocket connections
+- Robot registration
+- Sensor updates
+- Robot commands
+- MANUAL/AUTO mode switching
+- Dashboard state updates
+- Server-side coordination
 
 ---
 
-## Robot Hardware
+## `state.py`
 
-Each robot currently uses:
+Contains the central representation of the swarm state.
 
-* ESP32
-* L298N motor driver
-* Four DC motors
-* Ultrasonic distance sensor
-* Servo motor
+It maintains information such as:
 
-The four motors are controlled as two sides:
+- Connected robots
+- Robot positions
+- Robot orientations
+- Robot modes
+- Sensor readings
+- Pending commands
+- Robot paths
+- Global map cells
+
+The central state allows information from multiple robots to be maintained consistently by the server.
+
+---
+
+## `robot_manager.py`
+
+Responsible for the robot communication lifecycle.
+
+It handles:
+
+- Robot registration
+- Robot reconnection
+- Robot disconnection
+- Command transmission
+- Robot information exposed to the dashboard
+
+Robot state can be maintained by the server even when a robot temporarily disconnects.
+
+---
+
+## `map_manager.py`
+
+Maintains the logical exploration map.
+
+The map tracks information such as:
+
+- Visited cells
+- Free cells
+- Obstacles
+- Robot locations
+- Exploration paths
+
+The map uses logical grid coordinates rather than relying on continuous physical positioning.
+
+---
+
+## `auto_controller.py`
+
+Contains the autonomous exploration logic.
+
+The controller uses available robot state, sensor information, and the shared map to select movement for robots operating in `AUTO` mode.
+
+The current implementation provides a sensor-driven baseline exploration controller.
+
+---
+
+## `vision.py`
+
+Contains the server-side vision functionality and processing used by the project's vision pipeline.
+
+The vision system can process camera input and perform object detection using YOLO.
+
+Vision is treated as an additional perception layer alongside the core navigation system.
+
+---
+
+# Robot Firmware
+
+The robot firmware is located in:
 
 ```text
-Left side  → 2 motors
-Right side → 2 motors
+robots/
+├── robots.ino
+└── cam.ino
 ```
 
-This provides differential-style movement:
+## `robots.ino`
+
+`robots.ino` is the firmware for the main rover and other regular ESP32 robots that do not use a camera module.
+
+The regular ESP32 firmware provides:
+
+- Wi-Fi connection
+- mDNS
+- WebSocket communication
+- Motor control
+- Ultrasonic sensing
+- Movement timing
+- Forward obstacle protection
+- Robot registration
+- Sensor reporting
+
+The **main rover is currently configured as Robot ID 1**.
+
+Other regular ESP32 robots can use different IDs.
+
+---
+
+## `cam.ino`
+
+`cam.ino` is intended for ESP32 robots equipped with camera modules.
+
+Camera-equipped robots can participate in the same robot communication architecture while additionally providing camera data for the vision pipeline.
+
+---
+
+# Robot Hardware
+
+The current mobile robot uses:
+
+- ESP32
+- L298N motor driver
+- DC motors
+- Ultrasonic distance sensor
+- Robot chassis
+- External motor power supply
+
+The motors are controlled as left and right sides to provide differential-style movement.
+
+```text
+Left side  → Motor group
+Right side → Motor group
+```
+
+The robot supports:
 
 ```text
 FORWARD
 BACKWARD
 LEFT
 RIGHT
+STOP
 ```
 
-The robot currently moves in discrete movement blocks. Since wheel encoders are not currently used, the physical movement distance is approximated using motor runtime.
+Movement is currently implemented using timed motor commands.
+
+Because wheel encoders are not currently used, the physical distance travelled is approximated using movement duration rather than measured wheel displacement.
 
 ---
 
-## Ultrasonic Scanning
+# Ultrasonic Obstacle Detection
 
-The ultrasonic sensor is mounted on a servo.
+The ultrasonic sensor provides local distance information to the robot.
 
-The servo performs a three-direction scan:
+The current firmware continuously checks the front distance while the robot is moving forward.
 
-```text
-45°   → Left
-90°   → Front
-135°  → Right
-```
+If an obstacle is detected within the configured safety distance, the ESP32 immediately stops the motors.
 
-The resulting distances are sent to the server as sensor information.
-
-Example:
-
-```json
-{
-    "robot_id": 1,
-    "type": "SENSOR",
-    "left": 35.2,
-    "front": 72.5,
-    "right": 18.4
-}
-```
-
-The server uses these measurements to update its representation of the environment.
-
----
-
-## Communication
-
-The robots communicate with the server using WebSockets.
-
-The network currently follows:
+Example logic:
 
 ```text
-Phone Hotspot
-     │
-     ├── Laptop
-     │
-     ├── ESP32 Robot 1
-     ├── ESP32 Robot 2
-     └── ESP32 Robot N
+         Front
+           │
+           ▼
+      ┌─────────┐
+      │Ultrasonic│
+      │  Sensor  │
+      └────┬────┘
+           │
+           ▼
+      Distance Check
+           │
+      ┌────┴────┐
+      │         │
+   Safe      Obstacle
+      │         │
+      ▼         ▼
+   Continue    STOP
 ```
 
-Each robot identifies itself when connecting.
-
-Example registration message:
-
-```json
-{
-    "robot_id": 1,
-    "type": "REGISTER"
-}
-```
-
-The server sends commands in the following format:
-
-```json
-{
-    "robot_id": 1,
-    "command": "FORWARD"
-}
-```
-
----
-
-## Robot IDs
-
-Each ESP32 is assigned a unique integer ID.
-
-The ID is configured in:
-
-```text
-robots/robots.ino
-```
-
-For example:
+The current firmware uses a configurable threshold:
 
 ```cpp
-#define ROBOT_ID 1
+#define OBSTACLE_DISTANCE_CM 20.0
 ```
 
-Another robot can use:
+This provides a local safety mechanism independent of the server's autonomous decision-making.
+
+---
+
+# Robot Communication
+
+The robots communicate with the central server using WebSockets.
+
+The communication architecture is:
+
+```text
+Local Wi-Fi Network
+       │
+       ├── Laptop / Server
+       │
+       ├── ESP32 Robot 1
+       │
+       ├── ESP32 Robot 2
+       │
+       └── ESP32 Robot N
+```
+
+A phone hotspot can also be used as the local network during development and testing.
+
+---
+
+# Robot Registration
+
+Each robot has a unique ID.
+
+For example:
 
 ```cpp
 #define ROBOT_ID 2
 ```
 
-The server does not require a fixed number of connected robots. Robots can connect and disconnect dynamically.
+The ID must be changed when configuring different physical robots.
+
+The current primary rover uses:
+
+```cpp
+#define ROBOT_ID 1
+```
+
+When a robot establishes a WebSocket connection, it registers itself with the server.
+
+Example:
+
+```json
+{
+    "robot_id": 2,
+    "type": "REGISTER",
+    "camera": false
+}
+```
+
+The server can therefore identify individual robots and maintain separate state for each one.
+
+Example robot configuration:
+
+```text
+Robot 1 → ROBOT_ID 1 → Main rover
+Robot 2 → ROBOT_ID 2 → Additional rover
+Robot 3 → ROBOT_ID 3 → Additional rover
+```
+
+Each robot should use a unique `ROBOT_ID`.
 
 ---
 
-## Control Modes
+# Sensor Messages
 
-Every newly connected robot starts in:
+The ESP32 periodically reports ultrasonic information.
 
-```text
-MANUAL
+Example:
+
+```json
+{
+    "robot_id": 2,
+    "type": "SENSOR",
+    "front": 34.5
+}
 ```
 
-This prevents a robot from moving autonomously immediately after connecting.
+If a valid ultrasonic measurement is unavailable, the front distance is reported as unavailable.
 
-### Manual Mode
+---
 
-In `MANUAL` mode, movement commands are issued from the web dashboard.
+# Movement Commands
+
+The server sends movement commands to individual robots.
+
+Example:
+
+```json
+{
+    "robot_id": 2,
+    "command": "FORWARD"
+}
+```
+
+Supported commands:
 
 ```text
 FORWARD
 BACKWARD
 LEFT
 RIGHT
+STOP
 ```
 
-### Auto Mode
-
-In `AUTO` mode, the autonomous exploration controller determines the robot's movement.
-
-A robot must explicitly be switched to `AUTO` through the dashboard.
-
-If a robot reconnects, it is placed back into `MANUAL` mode.
+The ESP32 receives the command and executes the corresponding motor operation.
 
 ---
 
-## Exploration Map
+# Movement Safety
 
-The server maintains a global grid-based representation of the explored environment.
+Forward movement has an additional local safety check.
 
-Each discovered cell can contain information such as:
+Before starting a forward movement:
+
+```text
+Server
+  │
+  ▼
+FORWARD command
+  │
+  ▼
+ESP32 checks ultrasonic distance
+  │
+  ├── Safe ───────► Move Forward
+  │
+  └── Obstacle ───► Reject command
+```
+
+While moving forward, the ESP32 continues checking the ultrasonic sensor.
+
+If an obstacle enters the configured safety range, the motors are stopped immediately.
+
+This provides a hardware-level safety layer even if the server's navigation decision is not aware of the obstacle yet.
+
+---
+
+# Control Modes
+
+Each robot can operate in one of two modes:
+
+```text
+MANUAL
+AUTO
+```
+
+## Manual Mode
+
+In `MANUAL` mode, movement commands are issued from the dashboard.
+
+Available commands:
+
+```text
+FORWARD
+BACKWARD
+LEFT
+RIGHT
+STOP
+```
+
+Manual mode is primarily used for:
+
+- Testing hardware
+- Testing movement
+- Verifying sensors
+- Debugging robot communication
+- Manually exploring the environment
+
+---
+
+## Auto Mode
+
+In `AUTO` mode, the server's autonomous controller determines movement.
+
+The general process is:
+
+```text
+Sensor Information
+       │
+       ▼
+   Update State
+       │
+       ▼
+   Update Map
+       │
+       ▼
+Determine Available
+   Directions
+       │
+       ▼
+Select Exploration
+    Movement
+       │
+       ▼
+   Send Command
+       │
+       ▼
+    ESP32
+       │
+       ▼
+   Move Robot
+       │
+       ▼
+    Sense Again
+```
+
+Multiple robots can operate in `AUTO` mode while sharing the server's global state.
+
+---
+
+# Exploration Map
+
+SwarmNav maintains a grid-based logical representation of the explored environment.
+
+Cells can represent information such as:
 
 ```text
 START
@@ -331,81 +596,177 @@ OBSTACLE
 VISITED
 ```
 
-The map expands as robots discover new locations.
+The map expands as robots discover new areas.
 
-The coordinate system is:
-
-```text
-             NORTH
-               ↑
-               │
-       WEST ←──┼──→ EAST
-               │
-               ↓
-             SOUTH
-```
-
-Robot positions and movement paths are maintained using these logical coordinates.
-
----
-
-## Autonomous Exploration
-
-The current autonomous controller follows a sensor-driven exploration process:
+The logical coordinate system follows:
 
 ```text
-       Sensor Scan
-            │
-            ▼
-      Update Map
-            │
-            ▼
-   Determine Available
-      Directions
-            │
-            ▼
-   Find Unexplored Area
-            │
-            ▼
-      Select Movement
-            │
-            ▼
-       Move Robot
-            │
-            ▼
-       Scan Again
+                NORTH
+                  ↑
+                  │
+          WEST ←──┼──→ EAST
+                  │
+                  ↓
+                SOUTH
 ```
 
-Multiple robots can independently operate in `AUTO` mode while sharing the server's global state.
+Robot position and movement history are represented using these logical coordinates.
 
-The current implementation provides the foundation for cooperative exploration but does not yet implement the final multi-agent planning/RL system.
-
----
-
-## Dashboard
-
-The web dashboard provides a centralized interface for operating the swarm.
-
-It provides information including:
-
-* Robot ID
-* Position
-* Orientation
-* Connection status
-* Current action
-* Control mode
-* Ultrasonic measurements
-* Robot paths
-* Global exploration map
-
-It also provides:
-
-* Manual movement controls
-* MANUAL/AUTO switching
+This allows the server to reason about the environment independently of the physical dimensions of the robot chassis.
 
 ---
 
-## Installation
+# Autonomous Exploration
+
+The current exploration system follows a sensor-driven approach:
+
+```text
+            ┌───────────────┐
+            │ Sensor Update │
+            └───────┬───────┘
+                    │
+                    ▼
+            ┌───────────────┐
+            │   Update Map  │
+            └───────┬───────┘
+                    │
+                    ▼
+            ┌───────────────┐
+            │ Find Available│
+            │  Directions   │
+            └───────┬───────┘
+                    │
+                    ▼
+            ┌───────────────┐
+            │ Find Unexplored│
+            │     Area      │
+            └───────┬───────┘
+                    │
+                    ▼
+            ┌───────────────┐
+            │ Select Action │
+            └───────┬───────┘
+                    │
+                    ▼
+            ┌───────────────┐
+            │  Move Robot   │
+            └───────┬───────┘
+                    │
+                    ▼
+                Sense Again
+```
+
+Multiple robots can operate in `AUTO` mode while sharing the server's global state.
+
+---
+
+# Dashboard
+
+The web dashboard provides a centralized interface for monitoring and controlling the robot swarm.
+
+It provides information such as:
+
+- Robot ID
+- Connection status
+- Position
+- Orientation
+- Current action
+- Control mode
+- Ultrasonic measurements
+- Robot paths
+- Exploration map
+- Robot state
+
+The dashboard also provides:
+
+- Manual movement controls
+- MANUAL/AUTO switching
+- Real-time robot monitoring
+- Exploration visualization
+
+The dashboard files are located in:
+
+```text
+dashboard/
+├── static/
+│   ├── app.js
+│   └── style.css
+│
+└── templates/
+    └── index.html
+```
+
+---
+
+# Vision Pipeline
+
+SwarmNav contains a YOLO-based vision pipeline for object detection.
+
+Relevant files include:
+
+```text
+image/
+├── test.py
+├── test_yolo.py
+└── test_yolo_img.py
+```
+
+The server-side vision implementation is located at:
+
+```text
+server/vision.py
+```
+
+The default object detection model used by most of the application is **YOLOv8n**.
+
+Model weights are kept outside the repository rather than being committed directly.
+
+The model can be changed according to the requirements of the application.
+
+Vision-related output is stored under:
+
+```text
+data/vision/
+```
+
+The vision pipeline can provide object detection information that can be associated with the exploration environment.
+
+A general perception flow is:
+
+```text
+Camera
+  │
+  ▼
+Object Detection
+  │
+  ▼
+Object / Location Association
+  │
+  ▼
+Exploration Map
+```
+
+The core navigation system can operate using ultrasonic sensing without requiring camera perception.
+
+---
+
+# Network Discovery
+
+The system uses mDNS to simplify local network communication.
+
+The ESP32 can identify itself using a hostname such as:
+
+```text
+rover-2.local
+```
+
+The server can also be discovered using its local hostname.
+
+This avoids requiring a fixed IP address for every robot during development.
+
+---
+
+# Installation
 
 Clone the repository:
 
@@ -418,10 +779,15 @@ Create a Python virtual environment:
 
 ```bash
 python3 -m venv .venv
+```
+
+Activate it:
+
+```bash
 source .venv/bin/activate
 ```
 
-Install the tested dependencies:
+Install the required dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -429,127 +795,127 @@ pip install -r requirements.txt
 
 ---
 
-## Running the Server
+# ESP32 Setup
 
-Start the FastAPI server from the project root:
+Open the appropriate robot firmware:
+
+```text
+robots/robots.ino
+```
+
+for regular ESP32 robots, or:
+
+```text
+robots/cam.ino
+```
+
+for camera-equipped robots.
+
+Configure the Wi-Fi credentials:
+
+```cpp
+const char* WIFI_SSID = "YOUR_WIFI";
+const char* WIFI_PASSWORD = "YOUR_PASSWORD";
+```
+
+Configure the robot identity:
+
+```cpp
+#define ROBOT_ID 1
+#define ROBOT_HOSTNAME "rover-1"
+```
+
+Each physical robot must use a unique `ROBOT_ID` and hostname.
+
+For example:
+
+```text
+Robot 1 → ROBOT_ID 1 → rover-1
+Robot 2 → ROBOT_ID 2 → rover-2
+Robot 3 → ROBOT_ID 3 → rover-3
+```
+
+The firmware can be uploaded using the Arduino IDE or another supported ESP32 development environment.
+
+---
+
+# Server Configuration
+
+The ESP32 firmware contains the server hostname and WebSocket configuration:
+
+```cpp
+const char* SERVER_HOST = "sujit";
+const uint16_t SERVER_PORT = 8000;
+const char* SERVER_WS_PATH = "/ws/robot";
+```
+
+`SERVER_HOST` should be changed to the hostname of the computer running the FastAPI server when deploying the project on another machine.
+
+The laptop running the server and the ESP32 robots must be connected to the same local network.
+
+---
+
+# Running the Server
+
+From the project root:
 
 ```bash
 uvicorn server.main:app --host 0.0.0.0 --port 8000
 ```
 
-The server will listen on:
+The server runs on:
 
 ```text
 http://0.0.0.0:8000
 ```
 
-Open the dashboard from a browser using the laptop's local network IP address:
+Open the dashboard from another device using the laptop's local IP address:
 
 ```text
 http://<LAPTOP_IP>:8000
+```
+
+For example:
+
+```text
+http://192.168.x.x:8000
 ```
 
 The ESP32 robots must be connected to the same network.
 
 ---
 
-## Requirements
+# Typical Startup Sequence
 
-The server requires Python and the dependencies listed in:
-
-```text
-requirements.txt
-```
-
-The requirements file contains the versions installed and tested during development.
-
-To reproduce the environment:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
----
-
-## Current Limitations
-
-The current implementation has several deliberate limitations:
-
-* No wheel encoders
-* No IMU-based odometry
-* Physical distance is estimated using motor runtime
-* Ultrasonic sensing provides local obstacle information
-* Current map representation is grid-based
-* Autonomous exploration is currently a baseline controller
-* Advanced multi-robot frontier assignment is not yet implemented
-* Collision avoidance between robots is not yet implemented
-* Reinforcement learning is not yet integrated
-* Camera-based perception is not currently part of the system
-
-These limitations leave clear areas for future development.
-
----
-
-## Future Development
-
-### Navigation and Mapping
-
-* Improved grid/graph representation
-* Frontier detection
-* BFS/A* path planning
-* Exploration target assignment
-* Robot collision avoidance
-* Deadlock detection
-* Backtracking
-* Complete reachable-area coverage
-
-### Multi-Robot Intelligence
-
-* Cooperative exploration
-* Multi-robot task allocation
-* Exploration load balancing
-* Shared exploration rewards
-* Multi-agent reinforcement learning
-* PPO/MAPPO-based exploration policies
-
-### Perception
-
-* Camera integration
-* Object detection
-* Object classification
-* Semantic mapping
-* Vision-assisted navigation
-
----
-
-## Project Direction
-
-The long-term objective of SwarmNav is to develop a cooperative robotic system capable of exploring an unknown environment using multiple low-cost mobile robots.
-
-The architecture separates:
+A typical deployment follows this sequence:
 
 ```text
-Hardware
-   ↓
-Communication
-   ↓
-Robot State
-   ↓
-Mapping
-   ↓
-Navigation
-   ↓
-Decision Making / RL
+1. Start local Wi-Fi network
+            │
+            ▼
+2. Start FastAPI server
+            │
+            ▼
+3. Power on ESP32 robots
+            │
+            ▼
+4. ESP32 connects to Wi-Fi
+            │
+            ▼
+5. ESP32 starts mDNS
+            │
+            ▼
+6. ESP32 discovers server
+            │
+            ▼
+7. WebSocket connection established
+            │
+            ▼
+8. Robot registers
+            │
+            ▼
+9. Dashboard displays robot
+            │
+            ▼
+10. MANUAL or AUTO operation
 ```
-
-This separation allows the hardware and communication infrastructure to be developed and tested independently from higher-level navigation and learning algorithms.
-
----
-
-## License
-
-This project is currently under development.
-
-License information will be added when the project is prepared for public release.

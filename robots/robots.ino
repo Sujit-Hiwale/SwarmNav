@@ -15,8 +15,8 @@ const char* WIFI_PASSWORD = "12345677";
 // ROBOT IDENTITY
 // ============================================================
 
-#define ROBOT_ID 2
-#define ROBOT_HOSTNAME "rover-2"
+#define ROBOT_ID 1
+#define ROBOT_HOSTNAME "rover-1"
 
 // ============================================================
 // SERVER
@@ -879,7 +879,7 @@ void setup() {
     );
 
     Serial.println(
-        "        ESP32 ROBOT_2"
+        "        ESP32 ROBOT_1"
     );
 
     Serial.println(
