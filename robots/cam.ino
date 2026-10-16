@@ -17,8 +17,8 @@ const char* WIFI_PASSWORD = "12345677";
 // ROBOT IDENTITY
 // ============================================================
 
-#define ROBOT_ID 1
-#define ROBOT_HOSTNAME "rover-1"
+#define ROBOT_ID 2
+#define ROBOT_HOSTNAME "rover-2"
 
 // ============================================================
 // SERVER
@@ -473,7 +473,7 @@ bool startCamera() {
     if (psramFound()) {
 
         config.frame_size =
-            FRAMESIZE_QVGA;
+            FRAMESIZE_VGA;
 
         config.jpeg_quality =
             12;
@@ -488,7 +488,7 @@ bool startCamera() {
     else {
 
         config.frame_size =
-            FRAMESIZE_QQVGA;
+            FRAMESIZE_VGA;
 
         config.jpeg_quality =
             15;
@@ -520,7 +520,7 @@ bool startCamera() {
 
         sensor->set_framesize(
             sensor,
-            FRAMESIZE_QVGA
+            FRAMESIZE_VGA
         );
     }
 
@@ -542,7 +542,7 @@ bool startCamera() {
             cameraServer.send(
                 200,
                 "text/plain",
-                "ROVER_1 CAMERA ONLINE"
+                "ROVER_2 CAMERA ONLINE"
             );
         }
     );
@@ -844,7 +844,7 @@ void setup() {
     Serial.println();
     Serial.println("================================");
 
-    Serial.println("      ESP32-CAM ROBOT_1");
+    Serial.println("      ESP32-CAM ROBOT_2");
 
     Serial.println("================================");
 

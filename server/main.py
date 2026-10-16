@@ -1,11 +1,17 @@
 import asyncio
 import json
+import cv2
+import numpy as np
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import (
     FastAPI,
     WebSocket,
     WebSocketDisconnect,
+    UploadFile,
+    File,
+    HTTPException,
 )
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,8 +27,12 @@ from .map_manager import (
     update_robot_position,
     mark_obstacles,
     get_map_data,
+    add_object_detection,
+    get_camera_sector,
+    camera_direction,
 )
 from .auto_controller import auto_controller
+from .vision import Vision
 
 
 # ============================================================
@@ -36,6 +46,20 @@ DASHBOARD_DIR = BASE_DIR / "dashboard"
 TEMPLATE_DIR = DASHBOARD_DIR / "templates"
 STATIC_DIR = DASHBOARD_DIR / "static"
 
+VISION_DIR = BASE_DIR / "data" / "vision"
+VISION_IMAGE_DIR = VISION_DIR / "images"
+VISION_JSON_FILE = VISION_DIR / "detections.json"
+
+VISION_IMAGE_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+if not VISION_JSON_FILE.exists():
+    VISION_JSON_FILE.write_text(
+        "[]",
+        encoding="utf-8"
+    )
 
 # ============================================================
 # APP
@@ -45,6 +69,180 @@ app = FastAPI(
     title="Multi-Robot RL Explorer"
 )
 
+vision = Vision(
+    model_path="yolov8n.pt",
+    confidence=0.25,
+)
+
+async def capture_rover_view(robot_id: int):
+    robot = robots.get(robot_id)
+
+    if robot is None:
+        print(f"[VISION] ROBOT_{robot_id} not connected")
+        return None
+
+    if robot_id == 1:
+        return None
+
+    if not getattr(robot, "camera_stream", None):
+        print(f"[VISION] ROBOT_{robot_id} has no camera stream")
+        return None
+
+    # Current map position + orientation
+    x = robot.x
+    y = robot.y
+    direction = robot.orientation
+
+    # --------------------------------------------------------
+    # Check whether this position + direction was already saved
+    # --------------------------------------------------------
+    try:
+        existing = json.loads(
+            VISION_JSON_FILE.read_text(encoding="utf-8")
+        )
+    except (json.JSONDecodeError, FileNotFoundError):
+        existing = []
+
+    for record in existing:
+        if (
+            record.get("robot_id") == robot_id
+            and record.get("robot_position", {}).get("x") == x
+            and record.get("robot_position", {}).get("y") == y
+            and record.get("robot_orientation") == direction
+        ):
+            print(
+                f"[VISION] ROBOT_{robot_id}: "
+                f"Already captured ({x}, {y}) facing {direction}"
+            )
+            return record
+
+    # --------------------------------------------------------
+    # Open rover camera
+    # --------------------------------------------------------
+    cap = cv2.VideoCapture(robot.camera_stream)
+
+    if not cap.isOpened():
+        print(
+            f"[VISION] ✗ Cannot open camera: "
+            f"{robot.camera_stream}"
+        )
+        return None
+
+    try:
+        # Give MJPEG stream a moment to provide a valid frame
+        frame = None
+
+        for _ in range(10):
+            success, temp = await asyncio.to_thread(cap.read)
+
+            if success and temp is not None:
+                frame = temp
+                break
+
+            await asyncio.sleep(0.1)
+
+        if frame is None:
+            print(
+                f"[VISION] ✗ Failed to capture "
+                f"ROBOT_{robot_id}"
+            )
+            return None
+
+    finally:
+        cap.release()
+
+    # --------------------------------------------------------
+    # Save exactly ONE image
+    # --------------------------------------------------------
+    filename = (
+        f"robot_{robot_id}_"
+        f"{x}_{y}_"
+        f"{direction}.jpg"
+    )
+
+    image_path = VISION_IMAGE_DIR / filename
+
+    if not cv2.imwrite(str(image_path), frame):
+        print(
+            f"[VISION] ✗ Failed to save image: "
+            f"{image_path}"
+        )
+        return None
+
+    print(
+        f"[VISION] ✓ Saved ROBOT_{robot_id}: "
+        f"({x}, {y}) facing {direction}"
+    )
+
+    # --------------------------------------------------------
+    # YOLO
+    # --------------------------------------------------------
+    detections = vision.process(frame)
+
+    map_observations = []
+
+    frame_height, frame_width = frame.shape[:2]
+
+    for detection in detections:
+
+        center_x, center_y = detection["center"]
+
+        relative_direction = get_camera_sector(
+            center_x,
+            frame_width,
+        )
+
+        absolute_direction = camera_direction(
+            direction,
+            relative_direction,
+        )
+
+        observation = add_object_detection(
+            robot_id=robot_id,
+            class_name=detection["class"],
+            confidence=detection["confidence"],
+            image=None,
+            direction=absolute_direction,
+            distance=1,
+        )
+
+        if observation is not None:
+            observation["relative_direction"] = relative_direction
+            observation["camera_position"] = {
+                "x": center_x,
+                "y": center_y,
+            }
+
+            map_observations.append(observation)
+
+    # --------------------------------------------------------
+    # Save record
+    # --------------------------------------------------------
+    record = {
+        "robot_id": robot_id,
+        "robot_position": {
+            "x": x,
+            "y": y,
+        },
+        "robot_orientation": direction,
+        "image": str(
+            image_path.relative_to(BASE_DIR)
+        ),
+        "timestamp": datetime.now().isoformat(),
+        "detections": map_observations,
+    }
+
+    existing.append(record)
+
+    VISION_JSON_FILE.write_text(
+        json.dumps(
+            existing,
+            indent=4,
+        ),
+        encoding="utf-8",
+    )
+
+    return record
 
 @app.on_event("startup")
 async def start_auto_controller():
@@ -61,6 +259,13 @@ app.mount(
     name="static",
 )
 
+app.mount(
+    "/vision-images",
+    StaticFiles(
+        directory=str(VISION_IMAGE_DIR)
+    ),
+    name="vision-images",
+)
 
 # ============================================================
 # DASHBOARD CLIENTS
@@ -75,9 +280,22 @@ dashboard_clients: set[WebSocket] = set()
 
 def get_state():
 
+    vision_data = []
+
+    if VISION_JSON_FILE.exists():
+        try:
+            vision_data = json.loads(
+                VISION_JSON_FILE.read_text(
+                    encoding="utf-8"
+                )
+            )
+        except Exception:
+            vision_data = []
+
     return {
         "robots": robot_data(),
         "map": get_map_data(),
+        "vision": vision_data,
     }
 
 
@@ -136,6 +354,293 @@ async def dashboard():
         encoding="utf-8"
     )
 
+
+# ============================================================
+# VISION IMAGE UPLOAD
+# ============================================================
+
+@app.post("/vision/{robot_id}")
+async def receive_vision_image(
+    robot_id: int,
+    file: UploadFile = File(...),
+):
+
+    # --------------------------------------------------------
+    # Only robots other than ROBOT_1 send vision frames.
+    # --------------------------------------------------------
+
+    if robot_id == 1:
+
+        raise HTTPException(
+            status_code=400,
+            detail="ROBOT_1 does not use the server vision upload."
+        )
+
+    robot = robots.get(robot_id)
+
+    if robot is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail=f"ROBOT_{robot_id} is not connected."
+        )
+
+    # --------------------------------------------------------
+    # Read image
+    # --------------------------------------------------------
+
+    image_bytes = await file.read()
+
+    if not image_bytes:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Empty image received."
+        )
+
+    frame = cv2.imdecode(
+        np.frombuffer(
+            image_bytes,
+            np.uint8
+        ),
+        cv2.IMREAD_COLOR
+    )
+
+    if frame is None:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image."
+        )
+
+    # --------------------------------------------------------
+    # Generate filename
+    # --------------------------------------------------------
+
+    timestamp = datetime.now().strftime(
+        "%Y%m%d_%H%M%S_%f"
+    )
+
+    filename = (
+        f"robot_{robot_id}_{timestamp}.jpg"
+    )
+
+    image_path = (
+        VISION_IMAGE_DIR
+        / filename
+    )
+
+    # --------------------------------------------------------
+    # Save original image
+    # --------------------------------------------------------
+
+    cv2.imwrite(
+        str(image_path),
+        frame
+    )
+
+    # --------------------------------------------------------
+    # Run YOLO
+    # --------------------------------------------------------
+
+    detections = vision.process(frame)
+
+    print(
+        f"[YOLO] ROBOT_{robot_id} "
+        f"({x},{y}) facing {direction}: "
+        f"{len(detections)} detections"
+    )
+
+    print(f"[YOLO] {detections}")
+
+    # --------------------------------------------------------
+    # Convert YOLO detections into map observations
+    # --------------------------------------------------------
+
+    map_observations = []
+
+    frame_height, frame_width = frame.shape[:2]
+
+    for detection in detections:
+
+        center_x, center_y = detection["center"]
+
+        # ----------------------------------------------------
+        # Determine where the object appears in the camera.
+        # ----------------------------------------------------
+
+        relative_direction = get_camera_sector(
+            center_x,
+            frame_width,
+        )
+
+        # ----------------------------------------------------
+        # Convert LEFT/CENTER/RIGHT into an absolute
+        # NORTH/EAST/SOUTH/WEST direction.
+        # ----------------------------------------------------
+
+        absolute_direction = camera_direction(
+            robot.orientation,
+            relative_direction,
+        )
+
+        # ----------------------------------------------------
+        # We don't have camera depth yet.
+        #
+        # Therefore assume the object occupies the
+        # adjacent grid cell.
+        #
+        # Later ultrasonic/depth estimation can replace 1.
+        # ----------------------------------------------------
+
+        distance = 1
+
+        observation = add_object_detection(
+
+            robot_id=robot_id,
+
+            class_name=detection["class"],
+
+            confidence=detection["confidence"],
+
+            image=frame,
+
+            direction=absolute_direction,
+
+            distance=distance,
+        )
+
+        if observation is not None:
+
+            observation["relative_direction"] = (
+                relative_direction
+            )
+
+            observation["camera_position"] = {
+                "x": center_x,
+                "y": center_y,
+            }
+
+            map_observations.append(
+                observation
+            )
+
+    # --------------------------------------------------------
+    # Convert detections to JSON-safe data
+    # --------------------------------------------------------
+
+    json_detections = map_observations
+
+    # --------------------------------------------------------
+    # Create observation
+    # --------------------------------------------------------
+
+    observation = {
+
+        "robot_id":
+            robot_id,
+
+        "robot_position": {
+            "x": robot.x,
+            "y": robot.y,
+        },
+
+        "robot_orientation":
+            robot.orientation,
+
+        "image":
+            str(
+                image_path.relative_to(
+                    BASE_DIR
+                )
+            ),
+
+        "timestamp":
+            datetime.now().isoformat(),
+
+        "detections":
+            json_detections,
+    }
+
+    # --------------------------------------------------------
+    # Store JSON
+    # --------------------------------------------------------
+
+    try:
+
+        existing = json.loads(
+            VISION_JSON_FILE.read_text(
+                encoding="utf-8"
+            )
+        )
+
+    except (
+        json.JSONDecodeError,
+        FileNotFoundError,
+    ):
+
+        existing = []
+
+    existing.append(
+        observation
+    )
+
+    VISION_JSON_FILE.write_text(
+        json.dumps(
+            existing,
+            indent=4
+        ),
+        encoding="utf-8"
+    )
+
+    print(
+        f"[VISION] ROBOT_{robot_id}: "
+        f"{len(json_detections)} objects detected"
+    )
+
+    # --------------------------------------------------------
+    # Return result to rover
+    # --------------------------------------------------------
+
+    return {
+
+        "success":
+            True,
+
+        "robot_id":
+            robot_id,
+
+        "image":
+            str(
+                image_path.relative_to(
+                    BASE_DIR
+                )
+            ),
+
+        "position": {
+            "x": robot.x,
+            "y": robot.y,
+        },
+
+        "orientation":
+            robot.orientation,
+
+        "detections":
+            json_detections,
+    }
+
+@app.post("/vision/capture/{robot_id}")
+async def capture_vision(robot_id: int):
+
+    record = await capture_rover_view(robot_id)
+
+    if record is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to capture rover image"
+        )
+
+    return record
 
 # ============================================================
 # DASHBOARD WEBSOCKET
@@ -421,10 +926,6 @@ async def robot_websocket(
                 await websocket.receive_text()
             )
 
-            print(
-                f"[ROBOT RX] {raw_message}"
-            )
-
             try:
 
                 data = json.loads(
@@ -598,11 +1099,6 @@ async def robot_websocket(
                     "SENSORS_UPDATED"
                 )
 
-                print(
-                    f"[SENSOR] ROBOT_{robot_id} "
-                    f"F={robot.front_distance}"
-                )
-
                 # Mark only front obstacle
                 mark_obstacles(
                     robot_id
@@ -667,6 +1163,9 @@ async def robot_websocket(
                                 f"Direction="
                                 f"{robot.orientation}"
                             )
+
+                            if robot_id != 1 and robot.camera_stream:
+                                await capture_rover_view(robot_id)
 
                     robot.pending_command = None
 

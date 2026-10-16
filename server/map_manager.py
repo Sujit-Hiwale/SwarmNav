@@ -35,6 +35,80 @@ LEFT_TURN = {
     "EAST": "NORTH",
 }
 
+# ============================================================
+# CAMERA RELATIVE DIRECTION
+# ============================================================
+
+CAMERA_RELATIVE_TO_ABSOLUTE = {
+    "NORTH": {
+        "LEFT": "WEST",
+        "CENTER": "NORTH",
+        "RIGHT": "EAST",
+    },
+
+    "EAST": {
+        "LEFT": "NORTH",
+        "CENTER": "EAST",
+        "RIGHT": "SOUTH",
+    },
+
+    "SOUTH": {
+        "LEFT": "EAST",
+        "CENTER": "SOUTH",
+        "RIGHT": "WEST",
+    },
+
+    "WEST": {
+        "LEFT": "SOUTH",
+        "CENTER": "WEST",
+        "RIGHT": "NORTH",
+    },
+}
+
+
+def camera_direction(
+    orientation: str,
+    relative_direction: str,
+):
+    """
+    Convert camera-relative direction into an
+    absolute map direction.
+
+    Example:
+
+        Robot facing EAST
+        Camera LEFT -> NORTH
+    """
+
+    return CAMERA_RELATIVE_TO_ABSOLUTE.get(
+        orientation,
+        {}
+    ).get(
+        relative_direction,
+        orientation,
+    )
+
+
+def get_camera_sector(
+    center_x: int,
+    frame_width: int,
+):
+    """
+    Divide the camera image into three horizontal
+    regions:
+
+        LEFT | CENTER | RIGHT
+    """
+
+    if center_x < frame_width / 3:
+
+        return "LEFT"
+
+    if center_x > (frame_width * 2 / 3):
+
+        return "RIGHT"
+
+    return "CENTER"
 
 # ============================================================
 # OBJECT STORAGE
@@ -243,8 +317,11 @@ def add_object_detection(
     # --------------------------------------------------------
 
     dx, dy = DIRECTIONS.get(
-        robot.orientation,
-        (0, 0)
+        direction,
+        DIRECTIONS.get(
+            robot.orientation,
+            (0, 0)
+        )
     )
 
     object_x = round(
@@ -279,19 +356,6 @@ def add_object_detection(
 
     if object_id not in objects:
 
-        image_path = None
-
-        if image is not None:
-
-            image_path = os.path.join(
-                OBJECT_IMAGE_DIR,
-                f"{object_id}_{int(time.time())}.jpg"
-            )
-
-            cv2.imwrite(
-                image_path,
-                image
-            )
 
         objects[object_id] = {
 
@@ -305,7 +369,7 @@ def add_object_detection(
                 object_position,
 
             "image":
-                image_path,
+                None,
 
             "confidence":
                 confidence,
@@ -428,7 +492,22 @@ def add_object_detection(
             time.time(),
     })
 
-    return object_id
+    return {
+    "object_id": object_id,
+    "class": class_name,
+    "position": {
+        "x": object_x,
+        "y": object_y,
+    },
+    "robot_id": robot_id,
+    "robot_position": {
+        "x": robot.x,
+        "y": robot.y,
+    },
+    "direction": direction,
+    "distance": distance,
+    "confidence": confidence,
+}
 
 
 # ============================================================

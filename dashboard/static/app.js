@@ -23,7 +23,7 @@ const mapSizeElement =
 let socket;
 
 let currentRobots = [];
-
+let currentVision = [];
 
 // ============================================================
 // WEBSOCKET
@@ -76,6 +76,9 @@ function connect() {
 
             currentRobots =
                 state.robots || [];
+
+            currentVision =
+                state.vision || [];
 
             render(state);
 
@@ -195,7 +198,8 @@ function render(state) {
 
     renderMap(
         state.map || [],
-        state.robots || []
+        state.robots || [],
+        state.vision || []
     );
 
 
@@ -211,7 +215,8 @@ function render(state) {
 
 function renderMap(
     cells,
-    robots
+    robots,
+    vision
 ) {
 
     mapElement.innerHTML = "";
@@ -404,6 +409,21 @@ function renderMap(
             const robot =
                 robotMap.get(key);
 
+            const cellVision =
+                vision.filter(
+                    record =>
+                        record.robot_position &&
+                        Number(record.robot_position.x) === Number(x) &&
+                        Number(record.robot_position.y) === Number(y)
+                );
+
+            console.log(
+                "CELL:",
+                x,
+                y,
+                "VISION:",
+                cellVision
+            );
 
             if (
                 pathMap.has(key)
@@ -451,6 +471,42 @@ function renderMap(
                 }
             }
 
+            if (cellVision.length > 0) {
+
+                div.classList.add(
+                    "has-vision"
+                );
+
+                const cameraIcon =
+                    document.createElement("span");
+
+                cameraIcon.className =
+                    "vision-indicator";
+
+                cameraIcon.textContent = "📷";
+
+                div.appendChild(
+                    cameraIcon
+                );
+            }
+
+            if (cellVision.length > 0) {
+
+                div.addEventListener(
+                    "click",
+                    event => {
+
+                        event.stopPropagation();
+
+                        showVisionPopup(
+                            div,
+                            x,
+                            y,
+                            cellVision
+                        );
+                    }
+                );
+            }
 
             if (
                 x === 0 &&
@@ -536,7 +592,6 @@ function renderMap(
     obstaclesElement.textContent =
         obstacles;
 }
-
 
 // ============================================================
 // DIRECTION
@@ -986,5 +1041,234 @@ document.addEventListener(
     }
 );
 
+function showVisionPopup(
+    cell,
+    x,
+    y,
+    records
+) {
+    hideVisionPopup();
+
+    const popup =
+        document.createElement("div");
+
+    popup.className =
+        "vision-popup";
+
+    let html = `
+        <strong>
+            📍 Position (${x}, ${y})
+        </strong>
+    `;
+
+    const directions = [
+        "NORTH",
+        "EAST",
+        "SOUTH",
+        "WEST"
+    ];
+
+    const icons = {
+        NORTH: "↑",
+        EAST: "→",
+        SOUTH: "↓",
+        WEST: "←"
+    };
+
+    const detections = [];
+
+    records.forEach(record => {
+        (record.detections || []).forEach(
+            detection => {
+                detections.push(detection);
+            }
+        );
+    });
+
+    html += `
+        <div class="vision-section">
+            <strong>🔎 Objects</strong>
+    `;
+
+    if (detections.length === 0) {
+
+        html += `
+            <div class="vision-empty">
+                No objects detected
+            </div>
+        `;
+
+    } else {
+
+        detections.forEach(detection => {
+
+            html += `
+                <div class="vision-object">
+                    <strong>
+                        ${detection.class}
+                    </strong>
+                    <br>
+                    Direction:
+                    ${detection.direction}
+                    <br>
+                    Confidence:
+                    ${(detection.confidence * 100).toFixed(1)}%
+                </div>
+            `;
+
+        });
+    }
+
+    html += `
+        </div>
+
+        <div class="vision-section">
+            <strong>📷 Camera Views</strong>
+
+            <div class="vision-buttons">
+    `;
+
+    directions.forEach(direction => {
+
+        const record =
+            records.find(
+                item =>
+                    item.robot_orientation ===
+                    direction
+            );
+
+        if (record) {
+
+            const imagePath =
+                record.image.replace(
+                    "data/vision/images/",
+                    "/vision-images/"
+                );
+
+            html += `
+                <button
+                    onclick="
+                        event.stopPropagation();
+                        openVisionImage(
+                            '${imagePath}',
+                            '${direction}'
+                        );
+                    "
+                >
+                    ${icons[direction]}
+                    ${direction}
+                </button>
+            `;
+
+        } else {
+
+            html += `
+                <button
+                    class="vision-disabled"
+                    disabled
+                >
+                    ${icons[direction]}
+                    ${direction}
+                </button>
+            `;
+        }
+    });
+
+    html += `
+            </div>
+        </div>
+    `;
+
+    popup.innerHTML = html;
+
+    document.body.appendChild(
+        popup
+    );
+
+    const rect =
+        cell.getBoundingClientRect();
+
+    popup.style.left =
+        `${rect.right + 8}px`;
+
+    popup.style.top =
+        `${rect.top}px`;
+
+    popup.id =
+        "active-vision-popup";
+}
+
+
+function hideVisionPopup() {
+
+    const popup =
+        document.getElementById(
+            "active-vision-popup"
+        );
+
+    if (popup) {
+        popup.remove();
+    }
+}
+
+
+function openVisionImage(
+    imagePath,
+    direction
+) {
+    const viewer =
+        document.createElement("div");
+
+    viewer.className =
+        "vision-viewer";
+
+    viewer.innerHTML = `
+        <div class="vision-viewer-content">
+
+            <button
+                class="vision-close"
+                onclick="
+                    this.parentElement
+                        .parentElement
+                        .remove()
+                "
+            >
+                ×
+            </button>
+
+            <h3>
+                📷 ${direction}
+            </h3>
+
+            <img
+                src="${imagePath}"
+                alt="Rover camera view"
+            >
+
+        </div>
+    `;
+
+    document.body.appendChild(
+        viewer
+    );
+}
+
+document.addEventListener(
+    "click",
+    event => {
+
+        const popup =
+            document.getElementById(
+                "active-vision-popup"
+            );
+
+        if (
+            popup &&
+            !popup.contains(event.target)
+        ) {
+            hideVisionPopup();
+        }
+    }
+);
 
 connect();

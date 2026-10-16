@@ -1,19 +1,8 @@
+#include <Arduino.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
-#include <ESP32Servo.h>
-
-// ============================================================
-// ROBOT ID
-// Change this before uploading to each ESP32
-//
-// Robot 1 -> 1
-// Robot 2 -> 2
-// Robot 3 -> 3
-// ============================================================
-
-#define ROBOT_ID 2
-
 
 // ============================================================
 // WIFI
@@ -22,183 +11,251 @@
 const char* WIFI_SSID = "Sujit";
 const char* WIFI_PASSWORD = "12345677";
 
+// ============================================================
+// ROBOT IDENTITY
+// ============================================================
+
+#define ROBOT_ID 2
+#define ROBOT_HOSTNAME "rover-2"
 
 // ============================================================
 // SERVER
-// IMPORTANT:
-// Replace this with your LAPTOP'S IP address on the
-// "Sujit" hotspot network.
-//
 // ============================================================
 
-const char* SERVER_IP = "172.25.154.139";
-
+const char* SERVER_HOST = "sujit";
 const uint16_t SERVER_PORT = 8000;
-
-
-// ============================================================
-// L298N MOTOR PINS
-//
-// LEFT SIDE  -> IN1 / IN2
-// RIGHT SIDE -> IN3 / IN4
-//
-// The two physical left motors should be connected together
-// to the left L298N channel.
-// The two physical right motors should be connected together
-// to the right L298N channel.
-// ============================================================
-
-#define IN1 25
-#define IN2 26
-
-#define IN3 27
-#define IN4 14
-
-
-// L298N enable pins
-#define ENA 33
-#define ENB 32
-
+const char* SERVER_WS_PATH = "/ws/robot";
 
 // ============================================================
-// ULTRASONIC SENSOR
+// MOTORS
 // ============================================================
 
-#define TRIG_PIN 5
-#define ECHO_PIN 34
-
+#define MOTOR_IN1 13
+#define MOTOR_IN2 12
+#define MOTOR_IN3 14
+#define MOTOR_IN4 27
 
 // ============================================================
-// SERVO
+// ULTRASONIC
 // ============================================================
 
-#define SERVO_PIN 13
+#define ULTRASONIC_TRIG 2
+#define ULTRASONIC_ECHO 4
 
-#define LEFT_ANGLE 45
-#define FRONT_ANGLE 90
-#define RIGHT_ANGLE 135
+// ============================================================
+// MOVEMENT SETTINGS
+// ============================================================
 
+bool movingForward = false;
+bool movementActive = false;
 
-Servo scannerServo;
+unsigned long movementStartTime = 0;
+unsigned long movementDuration = 0;
+
+// Stop / blocked distance in centimeters
+#define OBSTACLE_DISTANCE_CM 20.0
+
+#define FORWARD_DURATION 1000
+#define BACKWARD_DURATION 1000
+#define LEFT_DURATION 500
+#define RIGHT_DURATION 500
+
+// ============================================================
+// WEBSOCKET
+// ============================================================
 
 WebSocketsClient webSocket;
 
+// ============================================================
+// STATE
+// ============================================================
+
+bool mdnsReady = false;
+bool serverConfigured = false;
+bool serverConnected = false;
+
+unsigned long lastServerResolve = 0;
+unsigned long lastSensorReport = 0;
+
+float frontDistance = -1.0;
 
 // ============================================================
-// MOVEMENT
+// FORWARD DECLARATIONS
 // ============================================================
 
-// One grid/block movement.
-//
-// This MUST eventually be calibrated for your robot.
-unsigned long BLOCK_TIME = 800;
-
-// Approximate 90-degree turning time.
-//
-// This MUST also be calibrated.
-unsigned long TURN_TIME = 450;
-
-
-// Motor speed: 0-255
-int MOTOR_SPEED = 200;
-
-
-// Minimum safe distance in cm
-const float SAFE_DISTANCE = 20.0;
-
+void sendStatus(const char* status);
+void sendSensorData();
+bool frontBlocked();
+void executeCommand(const String& command);
 
 // ============================================================
 // MOTOR CONTROL
 // ============================================================
 
-void setLeftMotor(int speed)
-{
-    if (speed > 0)
-    {
-        digitalWrite(IN1, HIGH);
-        digitalWrite(IN2, LOW);
+void motorStop() {
 
-        ledcWrite(ENA, speed);
-    }
-    else if (speed < 0)
-    {
-        digitalWrite(IN1, LOW);
-        digitalWrite(IN2, HIGH);
+    digitalWrite(MOTOR_IN1, LOW);
+    digitalWrite(MOTOR_IN2, LOW);
+    digitalWrite(MOTOR_IN3, LOW);
+    digitalWrite(MOTOR_IN4, LOW);
 
-        ledcWrite(ENA, -speed);
-    }
-    else
-    {
-        digitalWrite(IN1, LOW);
-        digitalWrite(IN2, LOW);
-
-        ledcWrite(ENA, 0);
-    }
+    movingForward = false;
+    movementActive = false;
 }
 
 
-void setRightMotor(int speed)
-{
-    if (speed > 0)
-    {
-        digitalWrite(IN3, HIGH);
-        digitalWrite(IN4, LOW);
+// ------------------------------------------------------------
+// FORWARD
+// ------------------------------------------------------------
 
-        ledcWrite(ENB, speed);
-    }
-    else if (speed < 0)
-    {
-        digitalWrite(IN3, LOW);
-        digitalWrite(IN4, HIGH);
+void motorForward() {
 
-        ledcWrite(ENB, -speed);
-    }
-    else
-    {
-        digitalWrite(IN3, LOW);
-        digitalWrite(IN4, LOW);
+    digitalWrite(MOTOR_IN1, HIGH);
+    digitalWrite(MOTOR_IN2, LOW);
 
-        ledcWrite(ENB, 0);
-    }
+    digitalWrite(MOTOR_IN3, LOW);
+    digitalWrite(MOTOR_IN4, HIGH);
+
+    movingForward = true;
+}
+
+
+// ------------------------------------------------------------
+// LEFT
+// ------------------------------------------------------------
+
+void motorLeft() {
+
+    digitalWrite(MOTOR_IN1, LOW);
+    digitalWrite(MOTOR_IN2, HIGH);
+
+    digitalWrite(MOTOR_IN3, LOW);
+    digitalWrite(MOTOR_IN4, HIGH);
+
+    movingForward = false;
+}
+
+
+// ------------------------------------------------------------
+// RIGHT
+// ------------------------------------------------------------
+
+void motorRight() {
+
+    digitalWrite(MOTOR_IN1, HIGH);
+    digitalWrite(MOTOR_IN2, LOW);
+
+    digitalWrite(MOTOR_IN3, HIGH);
+    digitalWrite(MOTOR_IN4, LOW);
+
+    movingForward = false;
+}
+
+
+// ------------------------------------------------------------
+// BACKWARD
+// ------------------------------------------------------------
+
+void motorBackward() {
+
+    digitalWrite(MOTOR_IN1, LOW);
+    digitalWrite(MOTOR_IN2, HIGH);
+
+    digitalWrite(MOTOR_IN3, HIGH);
+    digitalWrite(MOTOR_IN4, LOW);
+
+    movingForward = false;
 }
 
 
 // ============================================================
-// MOVEMENT
+// MOVEMENT TIMER
 // ============================================================
 
-void stopMotors()
-{
-    setLeftMotor(0);
-    setRightMotor(0);
+void startMovement(
+    const String& command,
+    unsigned long duration
+) {
+
+    motorStop();
+
+    // --------------------------------------------------------
+    // FORWARD
+    // --------------------------------------------------------
+
+    if (command == "FORWARD") {
+
+        if (frontBlocked()) {
+
+            sendStatus("BLOCKED");
+
+            Serial.println(
+                "[SAFETY] FORWARD BLOCKED"
+            );
+
+            return;
+        }
+
+        motorForward();
+    }
+
+    // --------------------------------------------------------
+    // BACKWARD
+    // --------------------------------------------------------
+
+    else if (command == "BACKWARD") {
+
+        motorBackward();
+    }
+
+    // --------------------------------------------------------
+    // LEFT
+    // --------------------------------------------------------
+
+    else if (command == "LEFT") {
+
+        motorLeft();
+    }
+
+    // --------------------------------------------------------
+    // RIGHT
+    // --------------------------------------------------------
+
+    else if (command == "RIGHT") {
+
+        motorRight();
+    }
+
+    // --------------------------------------------------------
+    // START TIMER
+    // --------------------------------------------------------
+
+    movementStartTime = millis();
+    movementDuration = duration;
+
+    movementActive = true;
 }
 
 
-void moveForward()
-{
-    setLeftMotor(MOTOR_SPEED);
-    setRightMotor(MOTOR_SPEED);
-}
+// ============================================================
+// UPDATE MOVEMENT
+// ============================================================
 
+void updateMovement() {
 
-void moveBackward()
-{
-    setLeftMotor(-MOTOR_SPEED);
-    setRightMotor(-MOTOR_SPEED);
-}
+    if (!movementActive) {
+        return;
+    }
 
+    if (
+        millis() - movementStartTime
+        >= movementDuration
+    ) {
 
-void turnLeft()
-{
-    setLeftMotor(0);
-    setRightMotor(MOTOR_SPEED);
-}
+        motorStop();
 
-
-void turnRight()
-{
-    setLeftMotor(MOTOR_SPEED);
-    setRightMotor(0);
+        sendStatus("ACTION_COMPLETE");
+    }
 }
 
 
@@ -206,279 +263,354 @@ void turnRight()
 // ULTRASONIC
 // ============================================================
 
-float getDistance()
-{
-    digitalWrite(TRIG_PIN, LOW);
+float readUltrasonic() {
+
+    digitalWrite(
+        ULTRASONIC_TRIG,
+        LOW
+    );
+
     delayMicroseconds(2);
 
-    digitalWrite(TRIG_PIN, HIGH);
+    digitalWrite(
+        ULTRASONIC_TRIG,
+        HIGH
+    );
+
     delayMicroseconds(10);
 
-    digitalWrite(TRIG_PIN, LOW);
-
-    long duration = pulseIn(
-        ECHO_PIN,
-        HIGH,
-        30000
+    digitalWrite(
+        ULTRASONIC_TRIG,
+        LOW
     );
 
-    if (duration == 0)
-    {
-        return 400.0;
+    unsigned long duration =
+        pulseIn(
+            ULTRASONIC_ECHO,
+            HIGH,
+            30000
+        );
+
+    if (duration == 0) {
+
+        return -1.0;
     }
 
-    return duration * 0.0343 / 2.0;
+    float distance =
+        (duration * 0.0343) / 2.0;
+
+    return distance;
 }
 
 
 // ============================================================
-// SERVO SCANNING
+// FORWARD SAFETY CHECK
 // ============================================================
 
-float scanAngle(int angle)
-{
-    scannerServo.write(angle);
+void checkForwardSafety() {
 
-    delay(300);
-
-    return getDistance();
-}
-
-
-void performScan()
-{
-    float leftDistance;
-    float frontDistance;
-    float rightDistance;
-
-
-    // LEFT
-    leftDistance = scanAngle(LEFT_ANGLE);
-
-
-    // FRONT
-    frontDistance = scanAngle(FRONT_ANGLE);
-
-
-    // RIGHT
-    rightDistance = scanAngle(RIGHT_ANGLE);
-
-
-    // Return servo to front
-    scannerServo.write(FRONT_ANGLE);
-
-
-    StaticJsonDocument<256> doc;
-
-    doc["robot_id"] = ROBOT_ID;
-    doc["type"] = "SENSOR";
-
-    doc["left"] = leftDistance;
-    doc["front"] = frontDistance;
-    doc["right"] = rightDistance;
-
-
-    String output;
-
-    serializeJson(
-        doc,
-        output
-    );
-
-
-    webSocket.sendTXT(output);
-
-
-    Serial.print("SCAN | L: ");
-    Serial.print(leftDistance);
-
-    Serial.print(" | F: ");
-    Serial.print(frontDistance);
-
-    Serial.print(" | R: ");
-    Serial.println(rightDistance);
-}
-
-
-// ============================================================
-// STATUS
-// ============================================================
-
-void sendStatus(const char* status)
-{
-    StaticJsonDocument<160> doc;
-
-    doc["robot_id"] = ROBOT_ID;
-    doc["type"] = "STATUS";
-    doc["status"] = status;
-
-
-    String output;
-
-    serializeJson(
-        doc,
-        output
-    );
-
-
-    webSocket.sendTXT(output);
-
-
-    Serial.print("STATUS: ");
-    Serial.println(status);
-}
-
-
-// ============================================================
-// EXECUTE ONE COMMAND
-// ============================================================
-
-void executeCommand(String command)
-{
-    Serial.print("COMMAND: ");
-    Serial.println(command);
-
-
-    // --------------------------------------------------------
-    // SCAN
-    // --------------------------------------------------------
-
-    if (command == "SCAN")
-    {
-        performScan();
-        
+    if (!movingForward) {
         return;
     }
 
+    float distance =
+        readUltrasonic();
 
-    // --------------------------------------------------------
-    // STOP
-    // --------------------------------------------------------
+    if (distance >= 0) {
 
-    if (command == "STOP")
-    {
-        stopMotors();
+        frontDistance = distance;
 
-        sendStatus("ACTION_COMPLETE");
+        if (
+            distance <=
+            OBSTACLE_DISTANCE_CM
+        ) {
 
+            motorStop();
+
+            Serial.print(
+                "[SAFETY] Obstacle at "
+            );
+
+            Serial.print(
+                distance
+            );
+
+            Serial.println(
+                " cm - MOTOR STOPPED"
+            );
+
+            sendStatus("BLOCKED");
+        }
+    }
+}
+
+
+// ============================================================
+// CHECK FRONT
+// ============================================================
+
+bool frontBlocked() {
+
+    float distance =
+        readUltrasonic();
+
+    if (distance < 0) {
+
+        // No echo:
+        // do not treat as obstacle.
+        return false;
+    }
+
+    frontDistance =
+        distance;
+
+    return (
+        distance <=
+        OBSTACLE_DISTANCE_CM
+    );
+}
+
+
+// ============================================================
+// SEND STATUS
+// ============================================================
+
+void sendStatus(
+    const char* status
+) {
+
+    if (!serverConnected) {
         return;
     }
 
+    StaticJsonDocument<128> doc;
 
-    sendStatus("MOVING");
+    doc["robot_id"] =
+        ROBOT_ID;
 
+    doc["type"] =
+        "STATUS";
+
+    doc["status"] =
+        status;
+
+    String message;
+
+    serializeJson(
+        doc,
+        message
+    );
+
+    webSocket.sendTXT(
+        message
+    );
+
+    Serial.print(
+        "[STATUS] "
+    );
+
+    Serial.println(
+        message
+    );
+}
+
+
+// ============================================================
+// SEND SENSOR DATA
+// ============================================================
+
+void sendSensorData() {
+
+    if (!serverConnected) {
+        return;
+    }
+
+    StaticJsonDocument<128> doc;
+
+    doc["robot_id"] =
+        ROBOT_ID;
+
+    doc["type"] =
+        "SENSOR";
+
+    if (frontDistance >= 0) {
+
+        doc["front"] =
+            frontDistance;
+    }
+
+    else {
+
+        doc["front"] =
+            nullptr;
+    }
+
+    String message;
+
+    serializeJson(
+        doc,
+        message
+    );
+
+    webSocket.sendTXT(
+        message
+    );
+
+    Serial.print(
+        "[SENSOR] "
+    );
+
+    Serial.println(
+        message
+    );
+}
+
+
+// ============================================================
+// EXECUTE COMMAND
+// ============================================================
+
+void executeCommand(
+    const String& command
+) {
 
     // --------------------------------------------------------
     // FORWARD
     // --------------------------------------------------------
 
-    if (command == "FORWARD")
-    {
-        scannerServo.write(FRONT_ANGLE);
+    if (command == "FORWARD") {
 
-        delay(150);
-
-        float frontDistance =
-            getDistance();
-
-
-        Serial.print(
-            "Front distance: "
+        startMovement(
+            command,
+            FORWARD_DURATION
         );
 
         Serial.println(
-            frontDistance
+            "[MOTOR] FORWARD"
         );
 
-
-        // Safety check
-        if (frontDistance < SAFE_DISTANCE)
-        {
-            stopMotors();
-
-            sendStatus("BLOCKED");
-
-            performScan();
-
-            return;
-        }
-
-
-        moveForward();
-
-        delay(BLOCK_TIME);
-
-        stopMotors();
+        return;
     }
-
 
     // --------------------------------------------------------
     // BACKWARD
     // --------------------------------------------------------
 
-    else if (command == "BACKWARD")
-    {
-        moveBackward();
+    if (command == "BACKWARD") {
 
-        delay(BLOCK_TIME);
+        startMovement(
+            command,
+            BACKWARD_DURATION
+        );
 
-        stopMotors();
+        Serial.println(
+            "[MOTOR] BACKWARD"
+        );
+
+        return;
     }
-
 
     // --------------------------------------------------------
     // LEFT
     // --------------------------------------------------------
 
-    else if (command == "LEFT")
-    {
-        turnLeft();
+    if (command == "LEFT") {
 
-        delay(TURN_TIME);
+        startMovement(
+            command,
+            LEFT_DURATION
+        );
 
-        stopMotors();
+        Serial.println(
+            "[MOTOR] LEFT"
+        );
+
+        return;
     }
-
 
     // --------------------------------------------------------
     // RIGHT
     // --------------------------------------------------------
 
-    else if (command == "RIGHT")
-    {
-        turnRight();
+    if (command == "RIGHT") {
 
-        delay(TURN_TIME);
+        startMovement(
+            command,
+            RIGHT_DURATION
+        );
 
-        stopMotors();
-    }
-
-
-    // --------------------------------------------------------
-    // UNKNOWN COMMAND
-    // --------------------------------------------------------
-
-    else
-    {
-        stopMotors();
-
-        sendStatus("UNKNOWN_COMMAND");
+        Serial.println(
+            "[MOTOR] RIGHT"
+        );
 
         return;
     }
 
-
     // --------------------------------------------------------
-    // MOVEMENT COMPLETED
+    // STOP
     // --------------------------------------------------------
 
-    sendStatus(
-        "ACTION_COMPLETE"
+    if (command == "STOP") {
+
+        motorStop();
+
+        sendStatus(
+            "ACTION_COMPLETE"
+        );
+
+        Serial.println(
+            "[MOTOR] STOP"
+        );
+
+        return;
+    }
+
+    Serial.print(
+        "[MOTOR] Unsupported command: "
     );
 
+    Serial.println(
+        command
+    );
+}
 
-    // Immediately scan surroundings
-    performScan();
+
+// ============================================================
+// mDNS
+// ============================================================
+
+bool startMDNS() {
+
+    Serial.print(
+        "Starting mDNS as "
+    );
+
+    Serial.print(
+        ROBOT_HOSTNAME
+    );
+
+    Serial.println(
+        ".local"
+    );
+
+    if (
+        !MDNS.begin(
+            ROBOT_HOSTNAME
+        )
+    ) {
+
+        Serial.println(
+            "mDNS FAILED"
+        );
+
+        return false;
+    }
+
+    Serial.println(
+        "mDNS ready"
+    );
+
+    return true;
 }
 
 
@@ -490,118 +622,163 @@ void webSocketEvent(
     WStype_t type,
     uint8_t* payload,
     size_t length
-)
-{
-    switch (type)
-    {
-        // ----------------------------------------------------
-        // DISCONNECTED
-        // ----------------------------------------------------
+) {
 
-        case WStype_DISCONNECTED:
+    switch (type) {
 
-            Serial.println(
-                "WebSocket disconnected"
-            );
-
-            break;
-
-
-        // ----------------------------------------------------
+        // ====================================================
         // CONNECTED
-        // ----------------------------------------------------
+        // ====================================================
 
         case WStype_CONNECTED:
 
+            serverConnected = true;
+
             Serial.println(
-                "Connected to server"
+                "[WS] Connected to server"
             );
 
-
             {
-                StaticJsonDocument<128> doc;
 
-                doc["robot_id"] = ROBOT_ID;
-                doc["type"] = "REGISTER";
+                StaticJsonDocument<256> doc;
 
+                doc["robot_id"] =
+                    ROBOT_ID;
 
-                String output;
+                doc["type"] =
+                    "REGISTER";
+
+                // Regular ESP32 has no camera
+                doc["camera"] =
+                    false;
+
+                String message;
 
                 serializeJson(
                     doc,
-                    output
+                    message
                 );
 
-
                 webSocket.sendTXT(
-                    output
+                    message
+                );
+
+                Serial.print(
+                    "[WS] REGISTER -> "
+                );
+
+                Serial.println(
+                    message
                 );
             }
 
             break;
 
 
-        // ----------------------------------------------------
-        // MESSAGE
-        // ----------------------------------------------------
+        // ====================================================
+        // DISCONNECTED
+        // ====================================================
+
+        case WStype_DISCONNECTED:
+
+            serverConnected =
+                false;
+
+            motorStop();
+
+            Serial.println(
+                "[WS] Disconnected"
+            );
+
+            break;
+
+
+        // ====================================================
+        // TEXT MESSAGE
+        // ====================================================
 
         case WStype_TEXT:
-        {
+
             Serial.print(
-                "SERVER: "
+                "[WS] RX: "
             );
 
             Serial.println(
                 (char*)payload
             );
 
+            {
 
-            StaticJsonDocument<256> doc;
+                StaticJsonDocument<256> doc;
 
+                DeserializationError error =
+                    deserializeJson(
+                        doc,
+                        payload
+                    );
 
-            DeserializationError error =
-                deserializeJson(
-                    doc,
-                    payload
+                if (error) {
+
+                    Serial.println(
+                        "[WS] Invalid JSON"
+                    );
+
+                    break;
+                }
+
+                const char* command =
+                    doc["command"];
+
+                if (!command) {
+
+                    break;
+                }
+
+                String cmd =
+                    String(command);
+
+                // ------------------------------------------------
+                // MOTOR COMMANDS
+                // ------------------------------------------------
+
+                if (
+                    cmd == "FORWARD" ||
+                    cmd == "LEFT" ||
+                    cmd == "RIGHT" ||
+                    cmd == "BACKWARD" ||
+                    cmd == "STOP"
+                ) {
+
+                    executeCommand(
+                        cmd
+                    );
+
+                    break;
+                }
+
+                Serial.print(
+                    "[WS] Unknown command: "
                 );
 
-
-            if (error)
-            {
                 Serial.println(
-                    "Invalid JSON received"
+                    cmd
                 );
-
-                return;
             }
-
-
-            int targetRobot =
-                doc["robot_id"];
-
-
-            // Ignore commands intended
-            // for another robot
-
-            if (
-                targetRobot != ROBOT_ID
-            )
-            {
-                return;
-            }
-
-
-            String command =
-                doc["command"];
-
-
-            executeCommand(
-                command
-            );
-
 
             break;
-        }
+
+
+        // ====================================================
+        // ERROR
+        // ====================================================
+
+        case WStype_ERROR:
+
+            Serial.println(
+                "[WS] ERROR"
+            );
+
+            break;
 
 
         default:
@@ -612,51 +789,75 @@ void webSocketEvent(
 
 
 // ============================================================
-// WIFI
+// CONNECT TO SERVER
 // ============================================================
 
-void connectWiFi()
-{
-    Serial.println();
-    Serial.print(
-        "Connecting to WiFi: "
+bool connectToServer() {
+
+    Serial.println(
+        "Resolving"
     );
 
     Serial.println(
-        WIFI_SSID
+        SERVER_HOST
     );
 
+    IPAddress serverIP =
+        MDNS.queryHost(
+            SERVER_HOST,
+            5000
+        );
 
-    WiFi.begin(
-        WIFI_SSID,
-        WIFI_PASSWORD
-    );
+    if (
+        serverIP ==
+        IPAddress(
+            0,
+            0,
+            0,
+            0
+        )
+    ) {
 
+        Serial.println(
+            "Server mDNS resolution FAILED"
+        );
 
-    while (
-        WiFi.status() != WL_CONNECTED
-    )
-    {
-        delay(500);
-
-        Serial.print(".");
+        return false;
     }
 
-
-    Serial.println();
-
-    Serial.println(
-        "WiFi connected!"
-    );
-
-
     Serial.print(
-        "ESP32 IP: "
+        "Server found: "
     );
 
     Serial.println(
-        WiFi.localIP()
+        serverIP
     );
+
+    webSocket.begin(
+        serverIP.toString().c_str(),
+        SERVER_PORT,
+        SERVER_WS_PATH
+    );
+
+    webSocket.onEvent(
+        webSocketEvent
+    );
+
+    webSocket.setReconnectInterval(
+        5000
+    );
+
+    webSocket.enableHeartbeat(
+        15000,
+        3000,
+        2
+    );
+
+    Serial.println(
+        "[WS] Connection configured"
+    );
+
+    return true;
 }
 
 
@@ -664,139 +865,251 @@ void connectWiFi()
 // SETUP
 // ============================================================
 
-void setup()
-{
-    Serial.begin(115200);
+void setup() {
 
-    delay(1000);
+    Serial.begin(
+        115200
+    );
 
+    delay(2000);
 
     Serial.println();
     Serial.println(
-        "=============================="
-    );
-
-    Serial.print(
-        "ROBOT_"
+        "================================"
     );
 
     Serial.println(
-        ROBOT_ID
+        "        ESP32 ROBOT_2"
     );
 
     Serial.println(
-        "=============================="
+        "================================"
     );
 
 
-    // --------------------------------------------------------
-    // Motor pins
-    // --------------------------------------------------------
-
-    pinMode(IN1, OUTPUT);
-    pinMode(IN2, OUTPUT);
-
-    pinMode(IN3, OUTPUT);
-    pinMode(IN4, OUTPUT);
-
-
-    // --------------------------------------------------------
-    // PWM
-    // --------------------------------------------------------
-
-    ledcAttach(
-        ENA,
-        1000,
-        8
-    );
-
-    ledcAttach(
-        ENB,
-        1000,
-        8
-    );
-
-
-    stopMotors();
-
-
-    // --------------------------------------------------------
-    // Ultrasonic
-    // --------------------------------------------------------
+    // ========================================================
+    // MOTOR INITIALIZATION
+    // ========================================================
 
     pinMode(
-        TRIG_PIN,
+        MOTOR_IN1,
         OUTPUT
     );
 
     pinMode(
-        ECHO_PIN,
+        MOTOR_IN2,
+        OUTPUT
+    );
+
+    pinMode(
+        MOTOR_IN3,
+        OUTPUT
+    );
+
+    pinMode(
+        MOTOR_IN4,
+        OUTPUT
+    );
+
+    motorStop();
+
+
+    // ========================================================
+    // ULTRASONIC INITIALIZATION
+    // ========================================================
+
+    pinMode(
+        ULTRASONIC_TRIG,
+        OUTPUT
+    );
+
+    pinMode(
+        ULTRASONIC_ECHO,
         INPUT
     );
 
-
-    // --------------------------------------------------------
-    // Servo
-    // --------------------------------------------------------
-
-    scannerServo.setPeriodHertz(
-        50
+    digitalWrite(
+        ULTRASONIC_TRIG,
+        LOW
     );
 
-    scannerServo.attach(
-        SERVO_PIN,
-        500,
-        2400
-    );
-
-    scannerServo.write(
-        FRONT_ANGLE
+    Serial.println(
+        "[ULTRASONIC] Initialized"
     );
 
 
-    // --------------------------------------------------------
-    // WiFi
-    // --------------------------------------------------------
+    // ========================================================
+    // WIFI
+    // ========================================================
 
-    connectWiFi();
-
-
-    // --------------------------------------------------------
-    // WebSocket
-    // --------------------------------------------------------
-
-    webSocket.begin(
-        SERVER_IP,
-        SERVER_PORT,
-        "/ws/robot"
+    WiFi.mode(
+        WIFI_STA
     );
 
-
-    webSocket.onEvent(
-        webSocketEvent
+    WiFi.begin(
+        WIFI_SSID,
+        WIFI_PASSWORD
     );
 
-
-    webSocket.setReconnectInterval(
-        5000
+    Serial.print(
+        "Connecting to WiFi"
     );
 
+    while (
+        WiFi.status() !=
+        WL_CONNECTED
+    ) {
+
+        delay(500);
+
+        Serial.print(
+            "."
+        );
+    }
 
     Serial.println();
+
     Serial.println(
-        "Robot ready."
+        "WiFi connected!"
+    );
+
+    Serial.print(
+        "IP: "
+    );
+
+    Serial.println(
+        WiFi.localIP()
+    );
+
+
+    // ========================================================
+    // mDNS
+    // ========================================================
+
+    mdnsReady =
+        startMDNS();
+
+
+    // ========================================================
+    // SERVER
+    // ========================================================
+
+    if (mdnsReady) {
+
+        serverConfigured =
+            connectToServer();
+    }
+
+
+    // ========================================================
+    // READY
+    // ========================================================
+
+    Serial.println();
+
+    Serial.println(
+        "================================"
+    );
+
+    Serial.println(
+        "          ROBOT READY"
+    );
+
+    Serial.println(
+        "================================"
     );
 }
 
-void loop()
-{
-    if (WiFi.status() != WL_CONNECTED)
-    {
-        Serial.println("WiFi disconnected. Reconnecting...");
-        connectWiFi();
+
+// ============================================================
+// LOOP
+// ============================================================
+
+void loop() {
+
+    // ========================================================
+    // WEBSOCKET
+    // ========================================================
+
+    if (serverConfigured) {
+
+        webSocket.loop();
     }
 
-    webSocket.loop();
 
-    delay(10);
+    // ========================================================
+    // ULTRASONIC SAFETY
+    // ========================================================
+
+    checkForwardSafety();
+
+
+    // ========================================================
+    // MOVEMENT TIMER
+    // ========================================================
+
+    updateMovement();
+
+
+    // ========================================================
+    // SENSOR REPORT
+    // ========================================================
+
+    if (
+        millis() - lastSensorReport
+        >= 500
+    ) {
+
+        lastSensorReport =
+            millis();
+
+        frontDistance =
+            readUltrasonic();
+
+        Serial.print(
+            "[ULTRASONIC] Front: "
+        );
+
+        if (frontDistance >= 0) {
+
+            Serial.print(
+                frontDistance
+            );
+
+            Serial.println(
+                " cm"
+            );
+        }
+
+        else {
+
+            Serial.println(
+                "No echo"
+            );
+        }
+
+        sendSensorData();
+    }
+
+
+    // ========================================================
+    // RETRY SERVER CONNECTION
+    // ========================================================
+
+    if (
+        !serverConfigured &&
+        mdnsReady &&
+        millis() - lastServerResolve
+            > 5000
+    ) {
+
+        lastServerResolve =
+            millis();
+
+        serverConfigured =
+            connectToServer();
+    }
+
+
+    delay(2);
 }

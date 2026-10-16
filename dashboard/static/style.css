@@ -671,3 +671,196 @@ aside {
 .controller .control-button.stop:hover {
     background: #fecaca;
 }
+
+/* ============================================================
+   VISION
+   ============================================================ */
+
+.cell.has-vision {
+    box-shadow:
+        inset 0 0 0 2px #f59e0b;
+}
+
+
+.vision-indicator {
+
+    position: absolute;
+
+    bottom: 2px;
+    right: 3px;
+
+    font-size: 13px;
+
+    z-index: 5;
+}
+
+
+.vision-popup {
+
+    position: fixed;
+
+    z-index: 1000;
+
+    width: 250px;
+
+    background: white;
+
+    border: 1px solid #d1d5db;
+
+    border-radius: 10px;
+
+    padding: 12px;
+
+    box-shadow:
+        0 8px 25px
+        rgba(0, 0, 0, 0.18);
+
+    font-size: 13px;
+}
+
+
+.vision-section {
+
+    margin-top: 10px;
+}
+
+
+.vision-object {
+
+    margin-top: 5px;
+
+    padding: 6px;
+
+    background: #f3f4f6;
+
+    border-radius: 6px;
+}
+
+
+.vision-empty {
+
+    margin-top: 8px;
+
+    color: #6b7280;
+}
+
+
+.vision-buttons {
+
+    display: grid;
+
+    grid-template-columns:
+        1fr 1fr;
+
+    gap: 5px;
+
+    margin-top: 7px;
+}
+
+
+.vision-buttons button {
+
+    border: 1px solid #d1d5db;
+
+    background: #eff6ff;
+
+    border-radius: 5px;
+
+    padding: 5px;
+
+    cursor: pointer;
+
+    font-size: 11px;
+}
+
+
+.vision-buttons button:hover {
+
+    background: #dbeafe;
+}
+
+
+.vision-buttons .vision-disabled {
+
+    background: #f3f4f6;
+
+    color: #9ca3af;
+
+    cursor: not-allowed;
+}
+
+
+/* ============================================================
+   IMAGE VIEWER
+   ============================================================ */
+
+.vision-viewer {
+
+    position: fixed;
+
+    inset: 0;
+
+    z-index: 2000;
+
+    background:
+        rgba(0, 0, 0, 0.8);
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    padding: 30px;
+}
+
+
+.vision-viewer-content {
+
+    position: relative;
+
+    max-width: 90vw;
+
+    max-height: 90vh;
+
+    background: white;
+
+    padding: 15px;
+
+    border-radius: 10px;
+
+    text-align: center;
+}
+
+
+.vision-viewer-content img {
+
+    display: block;
+
+    max-width: 85vw;
+
+    max-height: 75vh;
+
+    object-fit: contain;
+
+    margin: auto;
+}
+
+
+.vision-close {
+
+    position: absolute;
+
+    top: 5px;
+    right: 8px;
+
+    border: none;
+
+    background: none;
+
+    font-size: 28px;
+
+    cursor: pointer;
+
+    z-index: 2;
+}
